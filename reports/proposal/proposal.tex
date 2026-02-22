@@ -1,0 +1,123 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{natbib}
+
+\titlespacing*{\section}{0pt}{1.2ex plus 0.5ex minus 0.2ex}{0.8ex plus 0.2ex}
+\titlespacing*{\subsection}{0pt}{0.8ex plus 0.3ex minus 0.1ex}{0.5ex plus 0.1ex}
+
+\setlength{\parskip}{0.4em}
+\setlength{\parindent}{0pt}
+
+\title{\textbf{Cuffless Blood Pressure Estimation from Photoplethysmography\\Using Time-Series Feature Engineering and Ensemble Learning}}
+\author{Vignan Kamarthi \and Ariv Ahuja}
+\date{DS4400: Machine Learning 1 -- Spring 2026}
+
+\begin{document}
+\maketitle
+
+\section{Problem Description}
+
+Cardiovascular diseases (CVDs) are the leading cause of mortality worldwide. Blood pressure (BP) is a critical CVD risk indicator, yet conventional measurement requires an inflatable cuff, a method that is intrusive and only captures isolated snapshots rather than continuous readings. This makes it unsuitable for ongoing monitoring throughout daily life. Cuffless BP monitoring from wearable sensors would enable early hypertension detection and real-time cardiovascular tracking.
+
+Photoplethysmography (PPG), the optical pulse-sensing technology found in consumer smartwatches, captures blood volume changes that correlate with arterial pressure dynamics. This project frames cuffless BP estimation as a \textbf{supervised regression task}: given time-series features extracted from a 10-second PPG waveform segment, predict the corresponding systolic blood pressure (SBP, the peak pressure when the heart contracts) and diastolic blood pressure (DBP, the lowest pressure when the heart relaxes), both measured in mmHg.
+
+The core methodological contribution is a \textbf{dual feature extraction pipeline} combining Catch22 canonical time-series features with entropy-based complexity measures, followed by ensemble learning for BP regression. The Catch22 approach adapts methods from prior work on physiological signal classification \citep{boda2025ai4pain}, while the entropy-based features build on established information-theoretic measures including permutation entropy \citep{bandt2002permutation} and complexity-entropy analysis \citep{rosso2007distinguishing}, applied in ongoing biosignal complexity research. Together, these capture complementary aspects of PPG morphology relevant to arterial pressure.
+
+\section{Dataset}
+
+\textbf{PulseDB v2.0} \citep{wang2023pulsedb}\\
+\url{https://github.com/pulselabteam/PulseDB}
+
+\begin{itemize}[nosep]
+    \item \textbf{Source:} MIMIC-III Waveform Database Matched Subset (Beth Israel Deaconess Medical Center, Boston) + VitalDB (Seoul National University Hospital, South Korea), providing geographic and demographic diversity across two independent hospital systems
+    \item \textbf{Size:} 5,245,454 ten-second segments from 5,361 subjects (approximately 14,570 hours of recording)
+    \item \textbf{Signals:} Raw PPG waveform sampled at 125 Hz (1,250 data points per 10-second segment), with ground-truth SBP and DBP labels derived beat-by-beat from invasive arterial blood pressure (ABP) waveform recordings
+    \item \textbf{Splits:} Training (2,506 subjects), calibration-based test (same subjects as training but with held-out segments), calibration-free test (279 completely disjoint subjects never seen during training, with ground-truth labels retained for evaluation)
+\end{itemize}
+
+The calibration-free split is the more clinically meaningful evaluation: it tests whether the model generalizes to entirely new individuals without any patient-specific calibration data.
+
+\section{Approach and Methodology}
+
+\subsection{Feature Extraction}
+Each 10-second raw PPG segment (1,250 samples at 125 Hz) is transformed into a fixed-length feature vector through three complementary extraction methods:
+\begin{enumerate}[nosep]
+    \item \textbf{Catch22} (22 features): Canonical time-series features capturing autocorrelation structure, distributional properties, successive differences, and fluctuation scaling \citep{lubba2019catch22}. Applied following prior work on physiological signal classification \citep{boda2025ai4pain}.
+    \item \textbf{Statistical} ($\sim$8 features): Mean, median, standard deviation, skewness, kurtosis, root mean square, min, max.
+    \item \textbf{Entropy-based} ($\sim$5 features): Sample entropy, permutation entropy \citep{bandt2002permutation}, approximate entropy, spectral entropy, and Hjorth complexity. These quantify signal regularity and complexity, capturing aspects of PPG morphology not represented by Catch22 or statistical summaries.
+\end{enumerate}
+
+The resulting feature vector ($\sim$35 features per segment) is compact enough for efficient training over the full 5.2 million segments while capturing distinct dimensions of the PPG waveform relevant to blood pressure.
+
+\subsection{Feature Normalization}
+Standard scaling (z-score normalization) fitted on training data only, then applied to test data to prevent data leakage. Normalization is critical for Ridge regression, which is sensitive to feature scale. Tree-based models (Random Forest, XGBoost, LightGBM) are scale-invariant since they split on thresholds rather than feature magnitudes, but we normalize uniformly across all models for pipeline consistency and will run an ablation to confirm the impact.
+
+\subsection{Models}
+Separate models trained for SBP and DBP. Hyperparameters tuned via cross-validation.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Model} & \textbf{Type} & \textbf{Role} \\
+\midrule
+Ridge Regression & Regularized linear (L2 penalty) & Interpretable baseline \\
+Random Forest & Bagging ensemble & Variance reduction; feature importance \\
+XGBoost & Gradient boosting & Sequential error correction \\
+LightGBM & Histogram-based boosting & Efficient large-scale training \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Language and Packages}
+Python: \texttt{pycatch22}, \texttt{antropy}, \texttt{EntropyHub}, \texttt{scikit-learn}, \texttt{xgboost}, \texttt{lightgbm}. Feature extraction parallelized on NEU Explorer cluster (SLURM, 56 CPUs).
+
+\subsection{Evaluation Metrics}
+\begin{itemize}[nosep]
+    \item \textbf{MAE}: Primary accuracy metric. Target $<$ 5 mmHg per AAMI standard.
+    \item \textbf{SD of Error}: Prediction consistency. Target $<$ 8 mmHg per AAMI. Low MAE with high SD indicates unreliable individual predictions.
+    \item \textbf{RMSE}: Penalizes large errors more heavily than MAE, surfacing dangerous outlier predictions.
+    \item \textbf{$R^2$}: Proportion of BP variance explained by the model.
+    \item \textbf{Bland-Altman analysis}: Clinical agreement plot (mean vs.\ difference) showing bias and limits of agreement. Standard in medical device validation.
+\end{itemize}
+
+Results reported on both calibration-based and calibration-free test sets to quantify the generalization gap.
+
+\section{Outcome}
+
+\begin{itemize}[nosep]
+    \item Predict SBP and DBP from PPG with MAE approaching the AAMI clinical standard ($<$ 5 mmHg)
+    \item Demonstrate that Catch22 + entropy features capture BP-relevant PPG physiology
+    \item Quantify calibration-free vs.\ calibration-based performance gap
+    \item Identify top predictive PPG features via importance analysis and ablation
+\end{itemize}
+
+\section{Plan (Rough, Subject to Change)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Task} & \textbf{Owner} \\
+\midrule
+Dataset acquisition and EDA & Vignan \\
+Feature extraction pipeline & Vignan \\
+Baseline models (Ridge, RF) & Ariv \\
+Boosted models + tuning & Vignan \\
+Milestone report & Both \\
+Feature ablation study & Ariv \\
+Bland-Altman + AAMI evaluation & Vignan \\
+Final report + presentation & Both \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\newpage
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
