@@ -1,0 +1,60 @@
+# Agentic project files (never committed)
+CLAUDE.md
+MEMORY.md
+ANTIPATTERNS.md
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data (too large for git)
+data/raw/
+data/features/
+*.mat
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.parquet
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+*.toc
+
+# Results and outputs (created at runtime)
+results/
+logs/
+checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Cluster
+slurm-*.out
