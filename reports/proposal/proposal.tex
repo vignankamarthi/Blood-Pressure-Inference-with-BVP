@@ -1,7 +1,7 @@
 \documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage{booktabs}
-\usepackage{hyperref}
+\usepackage[hidelinks]{hyperref}
 \usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage{natbib}
@@ -29,17 +29,9 @@ The core methodological contribution is a \textbf{dual feature extraction pipeli
 
 \section{Dataset}
 
-\textbf{PulseDB v2.0} \citep{wang2023pulsedb}\\
-\url{https://github.com/pulselabteam/PulseDB}
+This project uses \textbf{PulseDB v2.0} \citep{wang2023pulsedb}, a large-scale photoplethysmography dataset publicly available at \url{https://github.com/pulselabteam/PulseDB}. PulseDB aggregates recordings from two independent hospital systems: the MIMIC-III Waveform Database Matched Subset (Beth Israel Deaconess Medical Center, Boston) and VitalDB (Seoul National University Hospital, South Korea), which provides geographic and demographic diversity. The dataset contains 5,245,454 ten-second segments from 5,361 subjects, totaling approximately 14,570 hours of recording. Each segment consists of a raw PPG waveform sampled at 125 Hz (1,250 data points), paired with ground-truth SBP and DBP labels derived beat-by-beat from invasive arterial blood pressure (ABP) waveform recordings.
 
-\begin{itemize}[nosep]
-    \item \textbf{Source:} MIMIC-III Waveform Database Matched Subset (Beth Israel Deaconess Medical Center, Boston) + VitalDB (Seoul National University Hospital, South Korea), providing geographic and demographic diversity across two independent hospital systems
-    \item \textbf{Size:} 5,245,454 ten-second segments from 5,361 subjects (approximately 14,570 hours of recording)
-    \item \textbf{Signals:} Raw PPG waveform sampled at 125 Hz (1,250 data points per 10-second segment), with ground-truth SBP and DBP labels derived beat-by-beat from invasive arterial blood pressure (ABP) waveform recordings
-    \item \textbf{Splits:} Training (2,506 subjects), calibration-based test (same subjects as training but with held-out segments), calibration-free test (279 completely disjoint subjects never seen during training, with ground-truth labels retained for evaluation)
-\end{itemize}
-
-The calibration-free split is the more clinically meaningful evaluation: it tests whether the model generalizes to entirely new individuals without any patient-specific calibration data.
+PulseDB provides three evaluation partitions: a training set (2,506 subjects), a calibration-based test set (held-out segments from the same training subjects), and a calibration-free test set (279 completely disjoint subjects never seen during training). The calibration-free split is the more clinically meaningful evaluation, as it tests whether the model generalizes to entirely new individuals without any patient-specific calibration data.
 
 \section{Approach and Methodology}
 
@@ -77,24 +69,11 @@ LightGBM & Histogram-based boosting & Efficient large-scale training \\
 Python: \texttt{pycatch22}, \texttt{antropy}, \texttt{EntropyHub}, \texttt{scikit-learn}, \texttt{xgboost}, \texttt{lightgbm}. Feature extraction parallelized on NEU Explorer cluster (SLURM, 56 CPUs).
 
 \subsection{Evaluation Metrics}
-\begin{itemize}[nosep]
-    \item \textbf{MAE}: Primary accuracy metric. Target $<$ 5 mmHg per AAMI standard.
-    \item \textbf{SD of Error}: Prediction consistency. Target $<$ 8 mmHg per AAMI. Low MAE with high SD indicates unreliable individual predictions.
-    \item \textbf{RMSE}: Penalizes large errors more heavily than MAE, surfacing dangerous outlier predictions.
-    \item \textbf{$R^2$}: Proportion of BP variance explained by the model.
-    \item \textbf{Bland-Altman analysis}: Clinical agreement plot (mean vs.\ difference) showing bias and limits of agreement. Standard in medical device validation.
-\end{itemize}
-
-Results reported on both calibration-based and calibration-free test sets to quantify the generalization gap.
+Model performance is assessed against the Association for the Advancement of Medical Instrumentation (AAMI) clinical standard, which requires mean absolute error (MAE) below 5 mmHg and standard deviation of error (SD) below 8 mmHg. MAE serves as the primary accuracy metric, while SD captures prediction consistency. Root mean squared error (RMSE) complements MAE by penalizing large errors more heavily, surfacing dangerous outlier predictions that MAE alone may mask. $R^2$ quantifies the proportion of blood pressure variance explained by the model. Finally, Bland-Altman analysis provides a clinical agreement plot of mean predicted value against prediction difference, visualizing systematic bias and limits of agreement as is standard in medical device validation. All metrics are reported on both the calibration-based and calibration-free test sets to quantify the generalization gap.
 
 \section{Outcome}
 
-\begin{itemize}[nosep]
-    \item Predict SBP and DBP from PPG with MAE approaching the AAMI clinical standard ($<$ 5 mmHg)
-    \item Demonstrate that Catch22 + entropy features capture BP-relevant PPG physiology
-    \item Quantify calibration-free vs.\ calibration-based performance gap
-    \item Identify top predictive PPG features via importance analysis and ablation
-\end{itemize}
+The primary objective is to predict SBP and DBP from PPG waveforms with MAE approaching the AAMI clinical standard of 5 mmHg. Beyond raw accuracy, this project aims to demonstrate that the combination of Catch22 canonical time-series features and entropy-based complexity measures captures BP-relevant PPG physiology effectively enough for clinical-grade estimation. We will quantify the calibration-free versus calibration-based performance gap to characterize how well the models generalize to unseen subjects, and conduct feature importance analysis and ablation studies to identify which PPG characteristics are most predictive of arterial pressure.
 
 \section{Plan (Rough, Subject to Change)}
 
