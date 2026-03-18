@@ -43,8 +43,10 @@ data/features/
 
 # Results and outputs (created at runtime)
 results/
-logs/
 checkpoints/
+
+# Tracking document (untracked -- human-machine contract)
+PLAN.md
 
 # OS
 .DS_Store

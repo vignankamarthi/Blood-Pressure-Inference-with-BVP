@@ -1,20 +1,22 @@
-# Core
-numpy>=1.24.0
+# Core (pin numpy<2 for compatibility)
+numpy>=1.24.0,<2.0.0
 pandas>=2.0.0
 scipy>=1.10.0
 
 # Data loading
 mat73>=0.62
+pyarrow>=14.0.0
 
-# Feature extraction
+# Feature extraction (Python reference only -- Rust is primary)
 pycatch22>=0.4.4
 antropy>=0.1.6
-EntropyHub>=2.0
+ordpy>=1.1.0
 
 # Machine learning
 scikit-learn>=1.3.0
 xgboost>=2.0.0
 lightgbm>=4.0.0
+optuna>=3.0.0
 
 # Visualization
 matplotlib>=3.7.0
@@ -27,3 +29,6 @@ ipykernel>=6.0.0
 # Utilities
 tqdm>=4.65.0
 joblib>=1.3.0
+
+# Testing
+pytest>=7.0.0

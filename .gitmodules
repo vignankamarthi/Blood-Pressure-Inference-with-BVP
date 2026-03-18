@@ -1,0 +1,3 @@
+[submodule "Feature-Extraction-Rust-Complete"]
+	path = Feature-Extraction-Rust-Complete
+	url = https://github.com/vignankamarthi/Feature-Extraction-Rust-Complete.git
