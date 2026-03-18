@@ -1,0 +1,24 @@
+{
+  "frameworks": ["catch22", "entropy", "stats"],
+  "entropy": {
+    "dimensions": [7],
+    "delays": [2],
+    "q_renyi": 1.0,
+    "q_tsallis": 1.0,
+    "sample_entropy_m": 2,
+    "approximate_entropy_m": 2
+  },
+  "signal": {
+    "sampling_frequency_hz": 125,
+    "segment_length_seconds": 10,
+    "segment_length_samples": 1250,
+    "nan_threshold": 0.2,
+    "min_signal_length": 50
+  },
+  "normalization": {
+    "strategy": "per_column_standard_scaler",
+    "fit_on": "training_subjects_only",
+    "pre_extraction": "none",
+    "notes": "LOCKED. No pre-extraction normalization. StandardScaler per feature column after extraction."
+  }
+}
