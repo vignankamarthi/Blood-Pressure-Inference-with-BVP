@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 #SBATCH --job-name=bp-download
 #SBATCH --partition=short
 #SBATCH --time=08:00:00

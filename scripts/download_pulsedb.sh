@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 # Download PulseDB v2.0 dataset (MIMIC + VitalDB) from Box.
 # Works on both local Mac and NEU Explorer cluster.
 #

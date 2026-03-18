@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 # One-time cluster setup for Blood Pressure Inference pipeline.
 # Run from: /projects/SensingandInnovationLab/vignankamarthi/Blood-Pressure-Inference/
 

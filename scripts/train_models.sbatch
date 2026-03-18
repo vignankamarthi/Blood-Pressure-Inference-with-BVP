@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/bash
 #SBATCH --job-name=bp-train
 #SBATCH --partition=short
 #SBATCH --time=08:00:00
