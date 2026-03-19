@@ -13,7 +13,9 @@
 # Resumable: re-run safely -- skips already-extracted files (-aos).
 # Logs to logs/ for cluster-to-local transfer.
 
-set -euo pipefail
+set -uo pipefail
+# NOTE: not using -e (exit on error) because 7zz piped through tee
+# can return non-zero even on success, killing the script prematurely
 
 export PATH="$HOME/bin:$PATH"
 PROJECT_DIR="/projects/SensingandInnovationLab/vignankamarthi/Blood-Pressure-Inference"
