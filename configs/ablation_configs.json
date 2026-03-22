@@ -1,0 +1,26 @@
+{
+  "ppg": {
+    "signals": ["ppg"],
+    "n_features": 40,
+    "dl_channels": 1,
+    "description": "PPG only (cuffless wearable)"
+  },
+  "ppg_ecg": {
+    "signals": ["ppg", "ecg"],
+    "n_features": 80,
+    "dl_channels": 2,
+    "description": "PPG + ECG"
+  },
+  "ppg_abp": {
+    "signals": ["ppg", "abp"],
+    "n_features": 80,
+    "dl_channels": 2,
+    "description": "PPG + ABP (gold standard ceiling)"
+  },
+  "ppg_ecg_abp": {
+    "signals": ["ppg", "ecg", "abp"],
+    "n_features": 120,
+    "dl_channels": 3,
+    "description": "PPG + ECG + ABP (absolute upper bound)"
+  }
+}
