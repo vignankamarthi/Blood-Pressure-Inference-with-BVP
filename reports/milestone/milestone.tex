@@ -1,0 +1,154 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{natbib}
+
+\titlespacing*{\section}{0pt}{1.2ex plus 0.5ex minus 0.2ex}{0.8ex plus 0.2ex}
+\titlespacing*{\subsection}{0pt}{0.8ex plus 0.3ex minus 0.1ex}{0.5ex plus 0.1ex}
+
+\setlength{\parskip}{0.4em}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+\begin{center}
+{\Large \textbf{DS 4400: Machine Learning and Data Mining I}} \\[0.3em]
+{\large Spring 2026} \\[0.3em]
+{\large Project Milestone Report} \\[1em]
+{\large Project Title: Cuffless Blood Pressure Estimation from Physiological Signals \\
+Using Time-Series Feature Engineering and Deep Learning} \\[0.8em]
+TA: Sharon \\
+Team Members: Vignan Kamarthi, Ariv Ahuja \\[0.5em]
+Link to code: \url{https://github.com/vignankamarthi/Blood-Pressure-Inference-with-BVP}
+\end{center}
+
+\section{Problem Description}
+
+Cardiovascular diseases are the leading cause of mortality worldwide, and blood pressure (BP) is among the most critical risk indicators. Conventional BP measurement requires an inflatable cuff, a method that is intrusive and captures only isolated snapshots rather than continuous readings. Cuffless BP monitoring from wearable sensors would enable early hypertension detection and real-time cardiovascular tracking without clinical intervention.
+
+Photoplethysmography (PPG), the optical pulse-sensing technology found in consumer smartwatches, captures blood volume changes that correlate with arterial pressure dynamics. We frame cuffless BP estimation as a \textbf{supervised regression task}: given a 10-second physiological signal segment sampled at 125 Hz, predict the corresponding systolic blood pressure (SBP) and diastolic blood pressure (DBP), both measured in mmHg.
+
+Our approach is a \textbf{two-track experiment} comparing handcrafted feature engineering against learned representations. Track 1 extracts 40 canonical time-series features per signal using a novel pure Rust implementation combining Catch22 features \citep{lubba2019catch22}, entropy-based complexity measures \citep{bandt2002permutation, rosso2007distinguishing}, and statistical descriptives, then trains traditional ML models. Track 2 feeds raw signal windows directly into deep learning architectures (1D CNN, LSTM, CNN-LSTM, Transformer) that learn features automatically. A 4-configuration ablation study across PPG, ECG, and ABP signals tests whether PPG alone is sufficient for clinically meaningful BP estimation, or whether additional physiological signals provide measurable improvement.
+
+This methodology adapts and extends prior work on physiological signal classification using Catch22 and ensemble learning \citep{boda2025ai4pain}, while the entropy-based features build on established information-theoretic measures applied in biosignal complexity research. The comprehensive review by \citet{zhao2023cuffless} provides the clinical and methodological context for cuffless BP estimation approaches.
+
+\section{Dataset and Exploratory Data Analysis}
+
+\subsection{Dataset Overview}
+
+We use \textbf{PulseDB v2.0} \citep{wang2023pulsedb}, a large-scale physiological dataset publicly available at \url{https://github.com/pulselabteam/PulseDB}. PulseDB aggregates recordings from two independent hospital systems: the MIMIC-III Waveform Database Matched Subset (Beth Israel Deaconess Medical Center, Boston, USA) and VitalDB (Seoul National University Hospital, South Korea), providing geographic and demographic diversity across two continents and clinical contexts (ICU vs.\ surgical monitoring). Table 1 summarizes the dataset.
+
+\begin{table}[ht!]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Statistic} & \textbf{Value} \\
+\midrule
+Total segments & 5,245,454 \\
+Total subjects & 5,361 \\
+Segment duration & 10 seconds (1,250 samples at 125 Hz) \\
+Signals per segment & PPG, ECG, ABP (3 channels) \\
+Labels & SBP, DBP (continuous, mmHg) \\
+Total recording time & $\sim$14,570 hours \\
+MIMIC subjects (files) & 2,423 \\
+VitalDB subjects (files) & 2,938 \\
+Total on disk (uncompressed) & 963 GB \\
+Train/test split & Subject-level (pre-defined by PulseDB) \\
+Test sets & Calibration-based + calibration-free (279 unseen subjects) \\
+Missing data & NaN filtering applied; segments with $>$20\% NaN rejected \\
+\bottomrule
+\end{tabular}
+\caption{PulseDB v2.0 dataset statistics.}
+\end{table}
+
+Each segment contains three raw physiological signals: PPG\_Record (photoplethysmography, the wearable-viable signal), ECG\_F (electrocardiogram, requiring chest electrodes), and ABP\_Raw (invasive arterial blood pressure, the gold standard from which SBP/DBP labels are derived). The calibration-free test set is the clinically meaningful evaluation, as it tests generalization to entirely new individuals without patient-specific calibration.
+
+\subsection{Exploratory Data Analysis}
+
+At the time of this milestone, the complete dataset has been downloaded and extracted on the NEU Explorer HPC cluster (963 GB across 5,361 subject files). Preliminary inspection of the .mat file structure confirms the expected fields (PPG\_Record, ECG\_F, ABP\_Raw, SegSBP, SegDBP, Age, Gender) are present with the documented shapes and data types. Full exploratory data analysis, including SBP/DBP distribution plots, signal quality characterization, and inter-subject variability analysis, will be completed in the coming days as the data processing pipeline executes on the cluster.
+
+\section{Approach and Methodology}
+
+\subsection{Two-Track Experiment Design}
+
+Our experiment compares two fundamentally different approaches to BP estimation:
+
+\textbf{Track 1: Feature Engineering + Traditional ML.} Each 10-second raw signal segment is transformed into a fixed-length feature vector through a novel pure Rust implementation of three complementary extraction methods: (1) Catch22 \citep{lubba2019catch22}, comprising 22 canonical time-series features capturing autocorrelation, distributional properties, fluctuation analysis, and spectral characteristics; (2) 10 entropy-based measures including permutation entropy \citep{bandt2002permutation}, statistical complexity \citep{rosso2007distinguishing}, Fisher-Shannon information, Renyi and Tsallis entropies, and sample/approximate entropy; and (3) 8 statistical descriptives (mean, median, standard deviation, skewness, kurtosis, RMS, min, max). This yields 40 features per signal. Features are normalized post-extraction using a per-column StandardScaler fitted on training subjects only. Five models span the complexity spectrum: Ridge regression (linear baseline), Decision Tree (nonlinear baseline), Random Forest (bagging), XGBoost (gradient boosting), and LightGBM (histogram-based boosting).
+
+\textbf{Track 2: Deep Learning on Raw Signals.} Raw 1,250-point signal windows are fed directly into neural networks without feature extraction, allowing the models to learn relevant representations automatically. Four architectures are evaluated: 1D CNN (local temporal patterns), bidirectional LSTM (sequential dependencies), CNN-LSTM hybrid (combined local and temporal), and Transformer with self-attention (long-range dependencies). All models use MSE loss, Adam optimizer, learning rate scheduling, and early stopping.
+
+\subsection{Ablation Study}
+
+A 2-phase ablation study tests whether PPG alone is sufficient or whether ECG and ABP signals add measurable value:
+
+\textbf{Phase 1 (PPG-only championship):} All 9 models (5 ML + 4 DL) are trained on PPG-only data for both SBP and DBP, yielding 18 model trainings. The best ML model and best DL model are identified.
+
+\textbf{Phase 2 (signal ablation):} The two champion models are retrained across four signal configurations: PPG-only (40 features / 1 channel), PPG+ECG (80 features / 2 channels), PPG+ABP (80 features / 2 channels), and PPG+ECG+ABP (120 features / 3 channels). This yields 16 additional trainings, for a total of 34 model trainings across the full experiment.
+
+The ABP configuration serves as a ceiling comparison: since SBP/DBP labels are derived from the ABP waveform, features extracted from ABP should yield near-perfect predictions. If PPG-only approaches ABP-derived performance, it validates PPG as sufficient for cuffless deployment.
+
+\subsection{Normalization Strategy}
+
+Our normalization strategy is informed by prior research on physiological signal classification, where per-subject normalization was shown to cause catastrophic performance collapse under subject-independent validation (75.4\% CV accuracy dropping to 32.8\% LOSO accuracy due to generalization failure). We apply no pre-extraction normalization to the raw signals. Post-extraction, each of the 40 feature columns is independently normalized to mean zero and unit variance using a StandardScaler fitted exclusively on training subjects and applied to all data. For deep learning, per-channel normalization is applied to the raw signal windows using training-set statistics.
+
+\subsection{Infrastructure}
+
+Feature extraction is implemented in pure Rust with Rayon parallelization across 56 CPU cores, adapting validated entropy algorithms from prior work \citep{boda2025ai4pain}. The Rust implementation is a novel contribution as no existing Rust crate for Catch22 features exists. All computation runs on the NEU Explorer HPC cluster with SLURM job scheduling. Every operation is designed for exhaustive checkpointing: Random Forest saves every 50 trees, XGBoost every 25 boosting rounds, LightGBM every 25 iterations, deep learning models every epoch, and Optuna trials persist to SQLite. SLURM wall-time kills result in zero lost work upon resubmission.
+
+\subsection{Evaluation Metrics}
+
+Model performance is assessed against the AAMI clinical standard (MAE $<$ 5 mmHg, SD $<$ 8 mmHg), with BHS grading (percentage of predictions within 5/10/15 mmHg thresholds), Bland-Altman agreement analysis, error stratification by BP category (normal, elevated, stage 1, stage 2 hypertension), and feature importance comparison across models. All metrics are reported on both calibration-based and calibration-free test sets.
+
+\section{Discussion and Preliminary Results}
+
+At this milestone, no model training has been completed. The full pipeline, from data acquisition through feature extraction, model training, and clinical evaluation, is implemented and tested (75 automated tests pass across the Rust and Python codebases), but the scale of the dataset (963 GB, 5.2 million segments) required significant infrastructure work that consumed the time between proposal and milestone.
+
+The primary challenges encountered were: (1) downloading 370 GB of compressed multi-part archives to the cluster, which required a resumable SLURM-based download script due to the multi-hour transfer time; (2) extracting the archives on the cluster, which required installing a 7z binary in user space since the system did not have p7zip available; and (3) adapting all scripts for the Rocky Linux 9 environment on the NEU Explorer cluster, including correcting bash shebang paths and handling the absence of certain compilers (clang) needed by Python packages.
+
+These challenges are fully resolved. The dataset is extracted, the Python environment is configured, and all SLURM job scripts are committed and ready for submission. We anticipate initial results within the first week following this milestone submission.
+
+\section{Remaining Work}
+
+The following work remains to complete the project:
+
+\begin{enumerate}[nosep]
+    \item Inspect the .mat file structure programmatically to verify all expected signal fields are present and correctly shaped.
+    \item Generate train/test/calibration-free subsets using the PulseDB-provided info files.
+    \item Compile the Rust feature extraction binary on the cluster and extract 40 features per signal for all 5.2 million segments.
+    \item Execute Phase 1 of the experiment: train all 9 models (5 ML + 4 DL) on PPG-only for both SBP and DBP.
+    \item Identify champion ML and DL models based on calibration-free test performance.
+    \item Execute Phase 2: retrain champions across 4 signal configurations for the ablation study.
+    \item Complete exploratory data analysis with SBP/DBP distributions, signal quality plots, and inter-subject variability characterization.
+    \item Conduct feature importance analysis and cross-track (ML vs. DL) comparison.
+    \item Write the final report with complete results, interpretation, and conclusions.
+\end{enumerate}
+
+\section{Team Member Contribution}
+
+\vspace{0.5em}
+\noindent
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Member} & \textbf{Completed} & \textbf{Remaining} \\
+\midrule
+Vignan Kamarthi & Rust feature extraction pipeline, & DL training, ablation study, \\
+ & DL architecture implementation, & Bland-Altman + AAMI evaluation, \\
+ & Python ML pipeline (data loading, & cross-track comparison, \\
+ & model training, evaluation modules) & final report \\
+\midrule
+Ariv Ahuja & Dataset acquisition, cluster setup, & Baseline models (Ridge, RF), \\
+ & SLURM scripts, checkpointing, & feature ablation analysis, \\
+ & literature review, proposal writing, & EDA visualizations, \\
+ & evaluation metric design & final report \\
+\bottomrule
+\end{tabular}
+
+\clearpage
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
