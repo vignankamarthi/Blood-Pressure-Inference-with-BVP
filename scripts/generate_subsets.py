@@ -107,9 +107,18 @@ def generate_subset(
     for rec in info_records:
         subject_segments[rec['Subj_Name']].append(rec['Subj_SegIDX'])
 
+    # Signal field mapping
+    signal_fields = {
+        'ppg': ppg_field,
+        'ecg': 'ECG_F',
+        'abp': 'ABP_Raw',
+    }
+
     # Pre-allocate output lists
     subjects = []
     ppg_signals = []
+    ecg_signals = []
+    abp_signals = []
     sbp_values = []
     dbp_values = []
     ages = []
@@ -154,28 +163,42 @@ def generate_subset(
                 # MATLAB is 1-indexed, Python is 0-indexed
                 seg = segments[idx - 1] if isinstance(segments, (list, np.ndarray)) else segments
 
-                # Extract PPG signal (raw or filtered)
+                # Extract metadata
                 if isinstance(seg, dict):
-                    ppg = np.array(seg.get(ppg_field, seg.get('PPG_F', [])), dtype=np.float64)
                     sbp = float(seg.get('SegSBP', np.nan))
                     dbp = float(seg.get('SegDBP', np.nan))
                     age = float(seg.get('Age', np.nan))
                     gender = str(seg.get('Gender', 'Unknown'))
-                elif hasattr(seg, ppg_field):
-                    ppg = np.array(getattr(seg, ppg_field), dtype=np.float64)
+                elif hasattr(seg, 'SegSBP'):
                     sbp = float(getattr(seg, 'SegSBP', np.nan))
                     dbp = float(getattr(seg, 'SegDBP', np.nan))
                     age = float(getattr(seg, 'Age', np.nan))
                     gender = str(getattr(seg, 'Gender', 'Unknown'))
                 else:
-                    logger.debug(f"  Segment {idx} missing {ppg_field} field")
+                    logger.debug(f"  Segment {idx} missing metadata fields")
                     continue
+
+                # Extract all 3 signals (PPG required, ECG/ABP optional)
+                def get_signal(seg, field_name):
+                    if isinstance(seg, dict):
+                        val = seg.get(field_name, [])
+                    elif hasattr(seg, field_name):
+                        val = getattr(seg, field_name)
+                    else:
+                        return np.array([], dtype=np.float64)
+                    return np.array(val, dtype=np.float64).flatten()
+
+                ppg = get_signal(seg, signal_fields['ppg'])
+                ecg = get_signal(seg, signal_fields['ecg'])
+                abp = get_signal(seg, signal_fields['abp'])
 
                 if len(ppg) == 0:
                     continue
 
                 subjects.append(subj_name)
-                ppg_signals.append(ppg.flatten())
+                ppg_signals.append(ppg)
+                ecg_signals.append(ecg)
+                abp_signals.append(abp)
                 sbp_values.append(sbp)
                 dbp_values.append(dbp)
                 ages.append(age)
@@ -197,6 +220,8 @@ def generate_subset(
         str(output_path),
         subjects=np.array(subjects),
         ppg_signals=np.array(ppg_signals, dtype=object),  # variable length
+        ecg_signals=np.array(ecg_signals, dtype=object),
+        abp_signals=np.array(abp_signals, dtype=object),
         sbp=np.array(sbp_values, dtype=np.float64),
         dbp=np.array(dbp_values, dtype=np.float64),
         ages=np.array(ages, dtype=np.float64),
