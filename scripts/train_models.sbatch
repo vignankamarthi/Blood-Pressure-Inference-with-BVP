@@ -9,11 +9,11 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=kamarthi.v@northeastern.edu
 
-# Blood Pressure Inference -- Model Training
-# Trains all 5 models x 2 targets with exhaustive checkpointing.
-# Auto-resumes from any checkpoint on resubmission.
+# Model Training with ablation config support.
+# Usage: sbatch --export=CONFIG=ppg scripts/train_models.sbatch
+#        sbatch --export=CONFIG=ppg_ecg,MODELS=rf scripts/train_models.sbatch
 
-set -euo pipefail
+set -uo pipefail
 
 PROJECT_DIR="/projects/SensingandInnovationLab/vignankamarthi/Blood-Pressure-Inference"
 cd "$PROJECT_DIR"
@@ -21,14 +21,18 @@ source .venv/bin/activate
 
 mkdir -p logs
 
-echo "=== Model Training ==="
-echo "Job ID: $SLURM_JOB_ID"
-echo "Start: $(date)"
-
+CONFIG="${CONFIG:-ppg}"
+MODELS="${MODELS:-ridge,dt,rf,xgb,lgbm}"
 SCRATCH_DIR="/scratch/kamarthi.v/bp-checkpoints"
 
+echo "=== Model Training ==="
+echo "Job ID: $SLURM_JOB_ID"
+echo "Config: $CONFIG | Models: $MODELS"
+echo "Start: $(date)"
+
 python scripts/train_models.py \
-    --features data/features/features.csv \
+    --config "$CONFIG" \
+    --models "$MODELS" \
     --checkpoint-dir "$SCRATCH_DIR" \
     --results-dir results \
     --resume
@@ -36,11 +40,10 @@ python scripts/train_models.py \
 echo "=== Training Complete ==="
 echo "End: $(date)"
 
-# Also run evaluation
 python scripts/evaluate.py \
-    --features data/features/features.csv \
-    --checkpoint-dir "$SCRATCH_DIR" \
-    --results-dir results
+    --features "data/features/$CONFIG/features_labeled.csv" \
+    --checkpoint-dir "$SCRATCH_DIR/$CONFIG" \
+    --results-dir "results/$CONFIG"
 
 echo "=== Evaluation Complete ==="
 echo "End: $(date)"

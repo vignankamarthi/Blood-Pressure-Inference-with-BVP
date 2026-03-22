@@ -28,12 +28,15 @@ import joblib
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train BP estimation models")
-    parser.add_argument("--features", type=str, default="data/features/features.csv",
-                        help="Path to Rust-extracted feature CSV")
+    parser.add_argument("--config", type=str, default="ppg",
+                        choices=["ppg", "ppg_ecg", "ppg_abp", "ppg_ecg_abp"],
+                        help="Ablation config (signal combination)")
+    parser.add_argument("--features", type=str, default=None,
+                        help="Path to feature CSV (auto-derived from --config if not set)")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints",
-                        help="Directory for checkpoints")
+                        help="Base directory for checkpoints (namespaced by config)")
     parser.add_argument("--results-dir", type=str, default="results",
-                        help="Directory for evaluation results")
+                        help="Base directory for results (namespaced by config)")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from checkpoint")
     parser.add_argument("--fresh", action="store_true",
@@ -53,11 +56,20 @@ def main():
     args = parse_args()
     logger = setup_logging(name="bp_pipeline")
 
-    feature_path = Path(args.features)
-    checkpoint_dir = Path(args.checkpoint_dir)
-    results_dir = Path(args.results_dir)
+    # Auto-derive feature path from config if not explicitly set
+    if args.features is None:
+        feature_path = Path(f"data/features/{args.config}/features_labeled.csv")
+    else:
+        feature_path = Path(args.features)
+
+    # Namespace checkpoints and results by config
+    checkpoint_dir = Path(args.checkpoint_dir) / args.config
+    results_dir = Path(args.results_dir) / args.config
     models_to_train = args.models.split(",")
     targets = args.targets.split(",")
+
+    logger.info(f"Config: {args.config}")
+    logger.info(f"Features: {feature_path}")
 
     # Safety check: --resume and --fresh are mutually exclusive
     if args.resume and args.fresh:

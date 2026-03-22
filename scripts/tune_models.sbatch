@@ -9,10 +9,10 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=kamarthi.v@northeastern.edu
 
-# Blood Pressure Inference -- Hyperparameter Tuning
-# Optuna with SQLite persistence. Auto-resumes on resubmission.
+# Hyperparameter tuning with ablation config support.
+# Usage: sbatch --export=CONFIG=ppg scripts/tune_models.sbatch
 
-set -euo pipefail
+set -uo pipefail
 
 PROJECT_DIR="/projects/SensingandInnovationLab/vignankamarthi/Blood-Pressure-Inference"
 cd "$PROJECT_DIR"
@@ -20,16 +20,18 @@ source .venv/bin/activate
 
 mkdir -p logs
 
+CONFIG="${CONFIG:-ppg}"
+MODELS="${MODELS:-ridge,dt,rf,xgb,lgbm}"
+SCRATCH_DIR="/scratch/kamarthi.v/bp-checkpoints"
+
 echo "=== Hyperparameter Tuning ==="
 echo "Job ID: $SLURM_JOB_ID"
+echo "Config: $CONFIG | Models: $MODELS"
 echo "Start: $(date)"
 
-# Symlink Optuna DBs to scratch for performance
-SCRATCH_DIR="/scratch/kamarthi.v/bp-checkpoints"
-mkdir -p "$SCRATCH_DIR/optuna"
-
 python scripts/train_models.py \
-    --features data/features/features.csv \
+    --config "$CONFIG" \
+    --models "$MODELS" \
     --checkpoint-dir "$SCRATCH_DIR" \
     --results-dir results \
     --tune \

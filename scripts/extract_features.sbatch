@@ -9,45 +9,72 @@
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=kamarthi.v@northeastern.edu
 
-# Blood Pressure Inference -- Feature Extraction (Rust)
-# Extracts Catch22 + entropy + statistical features from PulseDB PPG segments.
-# Checkpoint-aware: auto-resumes if checkpoint.json exists.
+# Feature Extraction (Rust) -- extracts 40 features from each signal type.
+# Runs 3 times: PPG, ECG, ABP. Each has separate output dir + checkpoint.
+# Auto-resumes: re-submit safely after wall-time kill.
 
-set -euo pipefail
+set -uo pipefail
 
 PROJECT_DIR="/projects/SensingandInnovationLab/vignankamarthi/Blood-Pressure-Inference"
 cd "$PROJECT_DIR"
 
 mkdir -p logs
 
-echo "=== Feature Extraction ==="
+RUST_BIN="$PROJECT_DIR/Feature-Extraction-Rust-Complete/target/release/feature_extraction_rust_complete"
+
+if [ ! -f "$RUST_BIN" ]; then
+    echo "ERROR: Rust binary not found. Run: sbatch scripts/build_rust.sbatch"
+    exit 1
+fi
+
+echo "=== Feature Extraction (3 signals) ==="
 echo "Job ID: $SLURM_JOB_ID"
-echo "Node: $SLURM_NODELIST"
 echo "CPUs: $SLURM_CPUS_PER_TASK"
 echo "Start: $(date)"
 
-RUST_BIN="$PROJECT_DIR/Feature-Extraction-Rust-Complete/target/release/feature_extraction_rust_complete"
+for SIGNAL in ppg ecg abp; do
+    INPUT_DIR="data/signals/$SIGNAL"
+    OUTPUT_DIR="data/features/$SIGNAL"
 
-# Auto-detect resume
-CHECKPOINT="data/features/checkpoint.json"
-if [ -f "$CHECKPOINT" ]; then
-    echo "Checkpoint found -- resuming..."
-    RESUME_FLAG="--resume"
-else
-    echo "No checkpoint -- starting fresh..."
+    if [ ! -d "$INPUT_DIR" ]; then
+        echo "SKIP $SIGNAL: $INPUT_DIR not found"
+        continue
+    fi
+
+    mkdir -p "$OUTPUT_DIR"
+
+    CHECKPOINT="$OUTPUT_DIR/checkpoint.json"
     RESUME_FLAG=""
-fi
+    if [ -f "$CHECKPOINT" ]; then
+        echo "[$SIGNAL] Checkpoint found -- resuming..."
+        RESUME_FLAG="--resume"
+    else
+        echo "[$SIGNAL] Starting fresh..."
+    fi
 
-$RUST_BIN extract \
-    --input-dir data/raw \
-    --output-dir data/features \
-    --frameworks catch22,entropy,stats \
-    --workers "$SLURM_CPUS_PER_TASK" \
-    --dimensions 7 \
-    --delays 2 \
-    $RESUME_FLAG \
-    -v 1
+    echo "[$SIGNAL] Extracting features from $INPUT_DIR -> $OUTPUT_DIR"
+    echo "[$SIGNAL] Start: $(date)"
+
+    $RUST_BIN extract \
+        --input-dir "$INPUT_DIR" \
+        --output-dir "$OUTPUT_DIR" \
+        --frameworks catch22,entropy,stats \
+        --workers "$SLURM_CPUS_PER_TASK" \
+        --dimensions 7 \
+        --delays 2 \
+        $RESUME_FLAG \
+        -v 1
+
+    echo "[$SIGNAL] Done: $(date)"
+    echo ""
+done
 
 echo "=== Feature Extraction Complete ==="
 echo "End: $(date)"
-echo "Output: data/features/features.csv"
+echo "Outputs:"
+for SIGNAL in ppg ecg abp; do
+    if [ -f "data/features/$SIGNAL/features.csv" ]; then
+        ROWS=$(wc -l < "data/features/$SIGNAL/features.csv")
+        echo "  $SIGNAL: $ROWS rows"
+    fi
+done

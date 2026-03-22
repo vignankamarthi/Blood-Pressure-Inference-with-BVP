@@ -217,3 +217,58 @@ def generate_leaderboard(results_dir: Path) -> Dict:
     atomic_json_write(results_dir / "leaderboard.json", leaderboard)
     logger.info(f"Leaderboard saved with {len(entries)} entries")
     return leaderboard
+
+
+def generate_ablation_leaderboard(results_base_dir: Path) -> Dict:
+    """
+    Generate cross-config comparison leaderboard.
+    Scans config subdirectories (ppg/, ppg_ecg/, etc.) and produces
+    a unified comparison showing how each model performs across configs.
+    """
+    import json
+
+    all_entries = []
+    configs_found = []
+
+    for config_dir in sorted(results_base_dir.iterdir()):
+        if not config_dir.is_dir():
+            continue
+        config_name = config_dir.name
+        leaderboard_path = config_dir / "leaderboard.json"
+
+        if not leaderboard_path.exists():
+            continue
+
+        configs_found.append(config_name)
+        with open(leaderboard_path) as f:
+            lb = json.load(f)
+
+        for entry in lb.get("entries", []):
+            entry["config"] = config_name
+            all_entries.append(entry)
+
+    if not all_entries:
+        logger.warning("No config leaderboards found for ablation comparison")
+        return {}
+
+    # Sort by config, then MAE
+    all_entries.sort(key=lambda x: (x["config"], x["MAE"]))
+
+    # Build comparison: for each model+target, show MAE across configs
+    comparison = {}
+    for entry in all_entries:
+        key = f"{entry['model']}_{entry['target']}"
+        if key not in comparison:
+            comparison[key] = {"model": entry["model"], "target": entry["target"]}
+        comparison[key][f"{entry['config']}_MAE"] = entry["MAE"]
+        comparison[key][f"{entry['config']}_AAMI"] = entry["AAMI"]
+
+    ablation_lb = {
+        "configs": configs_found,
+        "entries": all_entries,
+        "comparison": list(comparison.values()),
+    }
+
+    atomic_json_write(results_base_dir / "ablation_leaderboard.json", ablation_lb)
+    logger.info(f"Ablation leaderboard: {len(configs_found)} configs, {len(all_entries)} total entries")
+    return ablation_lb
