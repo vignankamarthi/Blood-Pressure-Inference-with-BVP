@@ -94,10 +94,11 @@ Blood-Pressure-Inference-with-BVP/
 │   ├── evaluate.py                   # Standalone evaluation
 │   ├── generate_subsets.py           # Python replacement for MATLAB script
 │   ├── inspect_mat_helper.py         # GATE G5: verify .mat structure
+│   ├── inspect_info_helper.py        # Inspect Info .mat field format
 │   ├── *.sbatch                      # SLURM scripts for all cluster operations
 │   └── setup_cluster.sh              # NEU Explorer one-time setup
 ├── configs/                          # Model + feature configuration
-├── tests/                            # 51 pytest tests + 24 Rust tests
+├── tests/                            # 58 pytest tests + 24 Rust tests
 ├── reports/                          # Proposal, milestone, final report
 └── data/                             # PulseDB (gitignored, cluster-only, 963 GB)
 ```
@@ -132,7 +133,7 @@ pip install -r requirements.txt
 # Build Rust feature extractor
 cd Feature-Extraction-Rust-Complete && cargo build --release && cd ..
 
-# Run tests (75 total: 24 Rust + 51 Python)
+# Run tests (82 total: 24 Rust + 58 Python)
 cargo test --manifest-path Feature-Extraction-Rust-Complete/Cargo.toml
 python -m pytest tests/ -v
 ```
