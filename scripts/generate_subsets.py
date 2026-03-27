@@ -354,8 +354,15 @@ def main():
 
     for info_name, output_name in subsets:
         info_path = info_dir / info_name
+        output_path = output_dir / output_name
+
         if not info_path.exists():
             logger.warning(f"Info file not found, skipping: {info_path}")
+            continue
+
+        # Checkpoint: skip subsets that already exist (resume after wall-time kill)
+        if output_path.exists():
+            logger.info(f"SKIP {output_name} -- already exists ({output_path})")
             continue
 
         logger.info(f"Generating {output_name}...")
@@ -363,7 +370,7 @@ def main():
         generate_subset(
             mimic_path, vital_path,
             info_records,
-            output_dir / output_name,
+            output_path,
             use_raw_ppg=use_raw,
         )
 
