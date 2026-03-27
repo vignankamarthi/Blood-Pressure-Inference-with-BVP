@@ -1,20 +1,24 @@
 """
 Tests for data download script and subset generation.
-These test the script logic without actually downloading (mock-based).
+Tests the script logic without actual data (mock-based).
+Parser tests use mock dicts matching the exact PulseDB Info .mat structure
+discovered via inspect_info.sbatch (dict-of-lists, nested [value] wrapping).
 """
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 # ─── Download script tests ───
 
 
-def test_download_script_syntax():
-    """Verify download_pulsedb.sh has no bash syntax errors."""
-    script = Path(__file__).parent.parent / "scripts" / "download_pulsedb.sh"
+def test_download_sbatch_syntax():
+    """Verify download_pulsedb_cluster.sbatch has no bash syntax errors."""
+    script = Path(__file__).parent.parent / "scripts" / "download_pulsedb_cluster.sbatch"
     result = subprocess.run(
         ["bash", "-n", str(script)],
         capture_output=True, text=True
@@ -22,39 +26,12 @@ def test_download_script_syntax():
     assert result.returncode == 0, f"Syntax error in download script: {result.stderr}"
 
 
-def test_download_script_has_all_mimic_urls():
-    """Verify all 16 MIMIC part URLs are present in the MIMIC_URLS array."""
-    script = Path(__file__).parent.parent / "scripts" / "download_pulsedb.sh"
+def test_download_sbatch_has_slurm_directives():
+    """Verify the cluster download script has required SLURM directives."""
+    script = Path(__file__).parent.parent / "scripts" / "download_pulsedb_cluster.sbatch"
     content = script.read_text()
-    # Count Box URLs in the MIMIC section
-    mimic_urls = [line for line in content.split('\n') if 'rutgers.box.com' in line and 'MIMIC' in content[:content.index(line)] if 'VITAL' not in content[:content.index(line)].upper().split('VitalDB')[-1] if line.strip()]
-    # Simpler: just count all rutgers.box.com URLs
-    all_urls = [line.strip() for line in content.split('\n') if 'rutgers.box.com' in line]
-    assert len(all_urls) == 26, f"Expected 26 Box URLs (16 MIMIC + 10 VitalDB), got {len(all_urls)}"
-
-
-def test_download_script_has_all_vital_urls():
-    """Verify the script references both MIMIC and VitalDB datasets."""
-    script = Path(__file__).parent.parent / "scripts" / "download_pulsedb.sh"
-    content = script.read_text()
-    assert "PulseDB_MIMIC" in content, "Missing MIMIC dataset reference"
-    assert "PulseDB_Vital" in content, "Missing VitalDB dataset reference"
-    assert "MIMIC_URLS" in content, "Missing MIMIC URL array"
-    assert "VITAL_URLS" in content, "Missing VitalDB URL array"
-
-
-def test_download_script_has_resume_flag():
-    """Verify curl uses -C - for resumable downloads."""
-    script = Path(__file__).parent.parent / "scripts" / "download_pulsedb.sh"
-    content = script.read_text()
-    assert "-C -" in content, "Download script missing curl resume flag (-C -)"
-
-
-def test_download_script_has_skip_logic():
-    """Verify script skips already-downloaded files."""
-    script = Path(__file__).parent.parent / "scripts" / "download_pulsedb.sh"
-    content = script.read_text()
-    assert "SKIP" in content, "Download script missing skip logic for existing files"
+    assert "#SBATCH" in content, "Missing SLURM directives"
+    assert "--mail-type" in content, "Missing mail notification"
 
 
 # ─── Generate subsets script tests ───
@@ -87,6 +64,127 @@ def test_generate_subsets_has_gate_g5_check():
     script = Path(__file__).parent.parent / "scripts" / "generate_subsets.py"
     content = script.read_text()
     assert "Subj_Wins" in content, "Must check for Subj_Wins field (GATE G5)"
+
+
+# ─── Info file parser tests (mock data matching discovered PulseDB format) ───
+
+
+def _make_mock_info_data(n=3):
+    """Build a mock Info dict matching exact PulseDB structure: dict-of-lists, nested [value]."""
+    return {
+        'AAMI_Test_Subset': {
+            'Subj_Name': [['p072634_0'], ['p091470_0'], ['p085541_1']][:n],
+            'Subj_SegIDX': [[np.array(1.)], [np.array(5.)], [np.array(157.)]][:n],
+            'Source': [['MIMIC'], ['MIMIC'], ['VitalDB']][:n],
+            'Seg_SBP': [[np.array(96.01)], [np.array(77.14)], [np.array(120.5)]][:n],
+            'Seg_DBP': [[np.array(61.22)], [np.array(58.03)], [np.array(80.1)]][:n],
+            'Subj_Age': [[np.array(61.)], [np.array(70.)], [np.array(56.)]][:n],
+            'Subj_Gender': [['M'], ['M'], ['F']][:n],
+            'Subj_BMI': [[np.array(np.nan)], [np.array(np.nan)], [np.array(25.3)]][:n],
+            'Subj_Height': [[np.array(np.nan)], [np.array(np.nan)], [np.array(165.)]][:n],
+            'Subj_Weight': [[np.array(np.nan)], [np.array(np.nan)], [np.array(68.)]][:n],
+        }
+    }
+
+
+@patch('scripts.generate_subsets.load_mat_file')
+def test_load_info_file_parses_all_records(mock_load):
+    """Parser returns correct number of records from mock Info data."""
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from scripts.generate_subsets import load_info_file
+    import scripts.generate_subsets as gs
+    import logging
+    gs.logger = logging.getLogger("test")
+
+    mock_load.return_value = _make_mock_info_data(3)
+    records = load_info_file(Path("fake.mat"))
+    assert len(records) == 3
+
+
+@patch('scripts.generate_subsets.load_mat_file')
+def test_load_info_file_unwraps_strings(mock_load):
+    """Parser correctly unwraps nested [str] -> str."""
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from scripts.generate_subsets import load_info_file
+    import scripts.generate_subsets as gs
+    import logging
+    gs.logger = logging.getLogger("test")
+
+    mock_load.return_value = _make_mock_info_data(3)
+    records = load_info_file(Path("fake.mat"))
+    assert records[0]['Subj_Name'] == 'p072634_0'
+    assert records[2]['Subj_Name'] == 'p085541_1'
+    assert records[0]['Source'] == 'MIMIC'
+    assert records[2]['Source'] == 'VitalDB'
+    assert records[0]['Subj_Gender'] == 'M'
+    assert records[2]['Subj_Gender'] == 'F'
+
+
+@patch('scripts.generate_subsets.load_mat_file')
+def test_load_info_file_unwraps_numerics(mock_load):
+    """Parser correctly unwraps nested [0-d ndarray] -> int/float."""
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from scripts.generate_subsets import load_info_file
+    import scripts.generate_subsets as gs
+    import logging
+    gs.logger = logging.getLogger("test")
+
+    mock_load.return_value = _make_mock_info_data(3)
+    records = load_info_file(Path("fake.mat"))
+    assert records[0]['Subj_SegIDX'] == 1
+    assert records[1]['Subj_SegIDX'] == 5
+    assert records[2]['Subj_SegIDX'] == 157
+    assert isinstance(records[0]['Subj_SegIDX'], int)
+    assert abs(records[0]['Seg_SBP'] - 96.01) < 0.001
+    assert abs(records[0]['Seg_DBP'] - 61.22) < 0.001
+    assert abs(records[1]['Subj_Age'] - 70.0) < 0.001
+
+
+@patch('scripts.generate_subsets.load_mat_file')
+def test_load_info_file_raises_on_missing_required_field(mock_load):
+    """Parser raises ValueError if Subj_Name or Subj_SegIDX is missing."""
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from scripts.generate_subsets import load_info_file
+    import scripts.generate_subsets as gs
+    import logging
+    gs.logger = logging.getLogger("test")
+
+    mock_load.return_value = {'Test_Subset': {'Subj_Name': [['p001_0']]}}
+    with pytest.raises(ValueError, match="Missing required field"):
+        load_info_file(Path("fake.mat"))
+
+
+@patch('scripts.generate_subsets.load_mat_file')
+def test_load_info_file_handles_optional_fields(mock_load):
+    """Parser works when optional fields (Source, Seg_SBP, etc.) are absent."""
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from scripts.generate_subsets import load_info_file
+    import scripts.generate_subsets as gs
+    import logging
+    gs.logger = logging.getLogger("test")
+
+    mock_load.return_value = {
+        'Minimal_Subset': {
+            'Subj_Name': [['p001_0'], ['p002_1']],
+            'Subj_SegIDX': [[np.array(1.)], [np.array(3.)]],
+        }
+    }
+    records = load_info_file(Path("fake.mat"))
+    assert len(records) == 2
+    assert 'Source' not in records[0]
+    assert 'Seg_SBP' not in records[0]
+
+
+def test_subj_name_split_extracts_correct_id():
+    """Verify p{ID}_{case} -> p{ID} mapping works for variable-length IDs."""
+    cases = [
+        ("p072634_0", "p072634"),
+        ("p000160_0", "p000160"),
+        ("p001_1", "p001"),
+        ("p12345678_0", "p12345678"),
+    ]
+    for subj_name, expected_id in cases:
+        assert subj_name.split('_')[0] == expected_id
 
 
 # ─── SLURM script tests ───

@@ -41,31 +41,81 @@ def load_mat_file(path: Path) -> Dict:
 
 def load_info_file(info_path: Path) -> List[Dict]:
     """
-    Load an Info .mat file.
-    Returns list of {Subj_Name: str, Subj_SegIDX: int} dicts.
+    Load a PulseDB Info .mat file.
+
+    Info files are HDF5 (.mat v7.3) with a single top-level key containing
+    a dict-of-lists. Each list has N elements (one per segment). Elements
+    are single-item lists wrapping str or 0-d ndarray.
+
+    Returns list of dicts with keys:
+        Subj_Name (str), Subj_SegIDX (int), Source (str),
+        Seg_SBP (float), Seg_DBP (float),
+        Subj_Age (float), Subj_Gender (str)
     """
     data = load_mat_file(info_path)
 
-    # Info files have a single field containing the struct array
+    # Info files have a single field containing the data dict
     # Find the main field (not __header__, __version__, __globals__)
+    info_data = None
     for key in data:
         if not key.startswith('_'):
             info_data = data[key]
             break
-    else:
+    if info_data is None:
         raise ValueError(f"No data field found in {info_path}")
 
-    # TODO: Parse info_data into list of {Subj_Name: str, Subj_SegIDX: int} dicts.
-    # The exact format depends on how mat73 loads PulseDB Info files.
-    # Run inspect_info.sbatch first, then implement the parser for the actual format.
+    if not isinstance(info_data, dict):
+        raise ValueError(
+            f"Expected dict, got {type(info_data).__name__} in {info_path}"
+        )
+
+    # Validate required fields
+    for field in ('Subj_Name', 'Subj_SegIDX'):
+        if field not in info_data:
+            raise ValueError(f"Missing required field '{field}' in {info_path}")
+
+    n_segments = len(info_data['Subj_Name'])
+    logger.info(f"  Found {n_segments} segment entries in {info_path.name}")
+
+    # Unwrap helpers for the nested [value] structure
+    def unwrap_str(lst, idx, default='Unknown'):
+        try:
+            val = lst[idx]
+            return str(val[0]) if isinstance(val, list) else str(val)
+        except (IndexError, TypeError):
+            return default
+
+    def unwrap_float(lst, idx, default=float('nan')):
+        try:
+            val = lst[idx]
+            return float(val[0]) if isinstance(val, list) else float(val)
+        except (IndexError, TypeError, ValueError):
+            return default
+
+    # Check which optional fields are present
+    has_source = 'Source' in info_data
+    has_sbp = 'Seg_SBP' in info_data
+    has_dbp = 'Seg_DBP' in info_data
+    has_age = 'Subj_Age' in info_data
+    has_gender = 'Subj_Gender' in info_data
+
     records = []
-
-    logger.info(f"  Info data type: {type(info_data).__name__}")
-    if isinstance(info_data, dict):
-        logger.info(f"  Keys: {sorted(info_data.keys())[:15]}")
-
-    # PLACEHOLDER: implement once format is known from inspect_info output
-    logger.warning(f"  Parser not yet implemented for this format -- run inspect_info.sbatch first")
+    for i in range(n_segments):
+        rec = {
+            'Subj_Name': unwrap_str(info_data['Subj_Name'], i),
+            'Subj_SegIDX': int(unwrap_float(info_data['Subj_SegIDX'], i)),
+        }
+        if has_source:
+            rec['Source'] = unwrap_str(info_data['Source'], i)
+        if has_sbp:
+            rec['Seg_SBP'] = unwrap_float(info_data['Seg_SBP'], i)
+        if has_dbp:
+            rec['Seg_DBP'] = unwrap_float(info_data['Seg_DBP'], i)
+        if has_age:
+            rec['Subj_Age'] = unwrap_float(info_data['Subj_Age'], i)
+        if has_gender:
+            rec['Subj_Gender'] = unwrap_str(info_data['Subj_Gender'], i)
+        records.append(rec)
 
     logger.info(f"  Loaded {len(records)} segment references from {info_path.name}")
     return records
@@ -91,11 +141,39 @@ def generate_subset(
     ppg_field = "PPG_Record" if use_raw_ppg else "PPG_F"
     logger.info(f"  Using PPG field: {ppg_field}")
 
-    # Group records by subject
+    # Resolve subdirectory structure (PulseDB archives extract with subdirectory)
+    mimic_subdir = mimic_path / "PulseDB_MIMIC"
+    vital_subdir = vital_path / "PulseDB_Vital"
+    if not mimic_subdir.exists():
+        mimic_subdir = mimic_path  # fallback to flat structure
+    if not vital_subdir.exists():
+        vital_subdir = vital_path
+
+    # Group records by subject, preserving Source and metadata from Info
     from collections import defaultdict
     subject_segments = defaultdict(list)
+    subject_source = {}
+    subject_meta = {}  # Per-segment metadata keyed by (subj_name, seg_idx)
+
     for rec in info_records:
-        subject_segments[rec['Subj_Name']].append(rec['Subj_SegIDX'])
+        subj_name = rec['Subj_Name']
+        seg_idx = rec['Subj_SegIDX']
+        subject_segments[subj_name].append(seg_idx)
+
+        # Store source (prefer explicit Source field, fallback to name suffix)
+        if 'Source' in rec:
+            subject_source[subj_name] = rec['Source']
+        elif subj_name not in subject_source:
+            suffix = subj_name.rsplit('_', 1)[-1]
+            subject_source[subj_name] = 'MIMIC' if suffix == '0' else 'VitalDB'
+
+        # Store per-segment metadata from Info file
+        subject_meta[(subj_name, seg_idx)] = {
+            'sbp': rec.get('Seg_SBP', np.nan),
+            'dbp': rec.get('Seg_DBP', np.nan),
+            'age': rec.get('Subj_Age', np.nan),
+            'gender': rec.get('Subj_Gender', 'Unknown'),
+        }
 
     # Signal field mapping
     signal_fields = {
@@ -119,13 +197,13 @@ def generate_subset(
     n_failed = 0
 
     for subj_name, seg_indices in subject_segments.items():
-        subj_id = subj_name[:7]
-        source = int(subj_name[-1])  # 0=MIMIC, 1=VitalDB
+        subj_id = subj_name.split('_')[0]  # "p072634_0" -> "p072634"
+        source = subject_source.get(subj_name, 'MIMIC')
 
-        if source == 0:
-            seg_path = mimic_path / f"{subj_id}.mat"
+        if source == 'MIMIC':
+            seg_path = mimic_subdir / f"{subj_id}.mat"
         else:
-            seg_path = vital_path / f"{subj_id}.mat"
+            seg_path = vital_subdir / f"{subj_id}.mat"
 
         if not seg_path.exists():
             logger.warning(f"  Segment file not found: {seg_path}")
@@ -139,34 +217,40 @@ def generate_subset(
             n_failed += 1
             continue
 
-        # Navigate to the segments array
-        # Structure: Subj_Wins is array of structs
-        if 'Subj_Wins' in seg_data:
-            segments = seg_data['Subj_Wins']
-        else:
+        # Navigate to the segments structure
+        if 'Subj_Wins' not in seg_data:
             logger.warning(f"  No 'Subj_Wins' in {seg_path}: {list(seg_data.keys())}")
             n_failed += 1
             continue
 
+        segments = seg_data['Subj_Wins']
+
+        # Normalize: mat73 loads struct arrays as dict-of-lists (column-oriented).
+        # Convert to list-of-dicts (row-oriented) for uniform segment indexing.
+        if isinstance(segments, dict):
+            field_names = list(segments.keys())
+            n_segs = len(next(iter(segments.values())))
+            segments = [
+                {k: segments[k][i] for k in field_names}
+                for i in range(n_segs)
+            ]
+
         for idx in seg_indices:
             try:
                 # MATLAB is 1-indexed, Python is 0-indexed
-                seg = segments[idx - 1] if isinstance(segments, (list, np.ndarray)) else segments
-
-                # Extract metadata
-                if isinstance(seg, dict):
-                    sbp = float(seg.get('SegSBP', np.nan))
-                    dbp = float(seg.get('SegDBP', np.nan))
-                    age = float(seg.get('Age', np.nan))
-                    gender = str(seg.get('Gender', 'Unknown'))
-                elif hasattr(seg, 'SegSBP'):
-                    sbp = float(getattr(seg, 'SegSBP', np.nan))
-                    dbp = float(getattr(seg, 'SegDBP', np.nan))
-                    age = float(getattr(seg, 'Age', np.nan))
-                    gender = str(getattr(seg, 'Gender', 'Unknown'))
-                else:
-                    logger.debug(f"  Segment {idx} missing metadata fields")
+                py_idx = idx - 1
+                if py_idx < 0 or py_idx >= len(segments):
+                    logger.debug(f"  Segment {idx} out of range for {subj_name} (has {len(segments)})")
                     continue
+
+                seg = segments[py_idx]
+
+                # Use metadata from Info file (already parsed, official PulseDB values)
+                meta = subject_meta.get((subj_name, idx), {})
+                sbp = meta.get('sbp', np.nan)
+                dbp = meta.get('dbp', np.nan)
+                age = meta.get('age', np.nan)
+                gender = meta.get('gender', 'Unknown')
 
                 # Extract all 3 signals (PPG required, ECG/ABP optional)
                 def get_signal(seg, field_name):
@@ -247,7 +331,7 @@ def main():
     # Check prerequisites
     if not mimic_path.exists():
         logger.error(f"MIMIC segment directory not found: {mimic_path}")
-        logger.error("Run scripts/download_pulsedb.sh first")
+        logger.error("Run sbatch scripts/download_pulsedb_cluster.sbatch first")
         sys.exit(1)
     if not info_dir.exists():
         logger.error(f"Info files directory not found: {info_dir}")
