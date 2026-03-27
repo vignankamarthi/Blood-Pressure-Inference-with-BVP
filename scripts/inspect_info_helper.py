@@ -29,8 +29,8 @@ def inspect_info(path: str):
         print(f"  type: {type(val).__name__}")
 
         if isinstance(val, dict):
-            print(f"  dict keys: {sorted(val.keys())[:15]}")
-            for sk, sv in sorted(val.items())[:5]:
+            print(f"  dict keys: {sorted(val.keys())}")
+            for sk, sv in sorted(val.items()):
                 if isinstance(sv, np.ndarray):
                     print(f"    {sk}: ndarray shape={sv.shape} dtype={sv.dtype}")
                     if sv.ndim == 1 and len(sv) > 0:
@@ -40,6 +40,24 @@ def inspect_info(path: str):
                     if len(sv) > 0:
                         print(f"      first 3: {sv[:3]}")
                         print(f"      [0] type: {type(sv[0]).__name__}")
+                        # Deep inspect for critical fields
+                        if sk in ('Subj_Name', 'Subj_SegIDX'):
+                            item = sv[0]
+                            print(f"      --- DEEP INSPECT {sk} ---")
+                            print(f"      [0] value: {item}")
+                            print(f"      [0] type: {type(item).__name__}")
+                            if isinstance(item, list) and len(item) > 0:
+                                inner = item[0]
+                                print(f"      [0][0] value: {inner}")
+                                print(f"      [0][0] type: {type(inner).__name__}")
+                                if hasattr(inner, 'shape'):
+                                    print(f"      [0][0] shape: {inner.shape}")
+                                    print(f"      [0][0] dtype: {inner.dtype}")
+                                    if inner.size <= 20:
+                                        print(f"      [0][0] full: {inner}")
+                            # Also show second subject for comparison
+                            if len(sv) > 1:
+                                print(f"      [1] value: {sv[1]}")
                 else:
                     print(f"    {sk}: {type(sv).__name__} = {sv}")
 
