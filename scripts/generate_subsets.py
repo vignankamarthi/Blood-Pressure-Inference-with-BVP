@@ -55,27 +55,17 @@ def load_info_file(info_path: Path) -> List[Dict]:
     else:
         raise ValueError(f"No data field found in {info_path}")
 
-    # Parse into list of dicts
+    # TODO: Parse info_data into list of {Subj_Name: str, Subj_SegIDX: int} dicts.
+    # The exact format depends on how mat73 loads PulseDB Info files.
+    # Run inspect_info.sbatch first, then implement the parser for the actual format.
     records = []
-    if isinstance(info_data, np.ndarray):
-        for item in info_data:
-            if hasattr(item, 'Subj_Name'):
-                records.append({
-                    'Subj_Name': str(item.Subj_Name),
-                    'Subj_SegIDX': int(item.Subj_SegIDX),
-                })
-            elif isinstance(item, dict):
-                records.append({
-                    'Subj_Name': str(item.get('Subj_Name', '')),
-                    'Subj_SegIDX': int(item.get('Subj_SegIDX', 0)),
-                })
-    elif isinstance(info_data, list):
-        for item in info_data:
-            if isinstance(item, dict):
-                records.append({
-                    'Subj_Name': str(item.get('Subj_Name', '')),
-                    'Subj_SegIDX': int(item.get('Subj_SegIDX', 0)),
-                })
+
+    logger.info(f"  Info data type: {type(info_data).__name__}")
+    if isinstance(info_data, dict):
+        logger.info(f"  Keys: {sorted(info_data.keys())[:15]}")
+
+    # PLACEHOLDER: implement once format is known from inspect_info output
+    logger.warning(f"  Parser not yet implemented for this format -- run inspect_info.sbatch first")
 
     logger.info(f"  Loaded {len(records)} segment references from {info_path.name}")
     return records
