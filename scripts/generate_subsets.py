@@ -19,7 +19,7 @@ Prerequisites:
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 
@@ -105,23 +105,112 @@ def load_subject_signals_h5py(
     return result
 
 
-def load_info_file(info_path: Path) -> List[Dict]:
+def load_info_file_h5py(info_path: Path) -> List[Dict]:
     """
-    Load a PulseDB Info .mat file.
+    Load a PulseDB Info .mat file using h5py for targeted reads.
 
-    Info files are HDF5 (.mat v7.3) with a single top-level key containing
-    a dict-of-lists. Each list has N elements (one per segment). Elements
-    are single-item lists wrapping str or 0-d ndarray.
+    Layout (confirmed by probe):
+      /<subset_name>/<field> -- Dataset, shape (1, N), dtype=object (references)
+      String fields (Subj_Name, Source, Gender): deref to (len, 1) uint16 -> chr()
+      Float fields (SegIDX, SBP, DBP, Age): deref to (1, 1) float64
 
     Returns list of dicts with keys:
         Subj_Name (str), Subj_SegIDX (int), Source (str),
         Seg_SBP (float), Seg_DBP (float),
         Subj_Age (float), Subj_Gender (str)
     """
+    import h5py
+
+    records = []
+    with h5py.File(str(info_path), 'r') as f:
+        # Find main key (not #refs#)
+        main_key = None
+        for k in f.keys():
+            if not k.startswith('#'):
+                main_key = k
+                break
+        if main_key is None:
+            raise ValueError(f"No data key found in {info_path}")
+
+        main = f[main_key]
+
+        # Validate required fields
+        for field in ('Subj_Name', 'Subj_SegIDX'):
+            if field not in main:
+                raise ValueError(f"Missing required field '{field}' in {info_path}")
+
+        # Get entry count
+        ds_name = main['Subj_Name']
+        n_entries = ds_name.shape[1] if ds_name.ndim == 2 else ds_name.shape[0]
+        logger.info(f"  Found {n_entries} segment entries in {info_path.name}")
+
+        def read_string(ds, idx):
+            ref = ds[0, idx] if ds.ndim == 2 else ds[idx]
+            data = f[ref][()]
+            return ''.join(chr(c) for c in data.flatten())
+
+        def read_float(ds, idx):
+            ref = ds[0, idx] if ds.ndim == 2 else ds[idx]
+            data = f[ref][()]
+            return float(data.flatten()[0])
+
+        # Check which optional fields are present
+        has_source = 'Source' in main
+        has_sbp = 'Seg_SBP' in main
+        has_dbp = 'Seg_DBP' in main
+        has_age = 'Subj_Age' in main
+        has_gender = 'Subj_Gender' in main
+
+        # Cache dataset handles (avoid repeated dict lookups)
+        ds_segidx = main['Subj_SegIDX']
+        ds_source = main['Source'] if has_source else None
+        ds_sbp = main['Seg_SBP'] if has_sbp else None
+        ds_dbp = main['Seg_DBP'] if has_dbp else None
+        ds_age = main['Subj_Age'] if has_age else None
+        ds_gender = main['Subj_Gender'] if has_gender else None
+
+        for i in range(n_entries):
+            rec = {
+                'Subj_Name': read_string(ds_name, i),
+                'Subj_SegIDX': int(read_float(ds_segidx, i)),
+            }
+            if has_source:
+                rec['Source'] = read_string(ds_source, i)
+            if has_sbp:
+                rec['Seg_SBP'] = read_float(ds_sbp, i)
+            if has_dbp:
+                rec['Seg_DBP'] = read_float(ds_dbp, i)
+            if has_age:
+                rec['Subj_Age'] = read_float(ds_age, i)
+            if has_gender:
+                rec['Subj_Gender'] = read_string(ds_gender, i)
+            records.append(rec)
+
+            if (i + 1) % 50000 == 0:
+                logger.info(f"  Parsed {i + 1}/{n_entries} Info entries")
+
+    logger.info(f"  Loaded {len(records)} segment references from {info_path.name}")
+    return records
+
+
+def load_info_file(info_path: Path) -> List[Dict]:
+    """
+    Load a PulseDB Info .mat file. Tries h5py first (fast), falls back to mat73.
+
+    Returns list of dicts with keys:
+        Subj_Name (str), Subj_SegIDX (int), Source (str),
+        Seg_SBP (float), Seg_DBP (float),
+        Subj_Age (float), Subj_Gender (str)
+    """
+    # Fast path: h5py targeted reads
+    try:
+        return load_info_file_h5py(info_path)
+    except Exception as e:
+        logger.debug(f"  h5py failed for Info file, falling back to mat73: {e}")
+
+    # Slow fallback: mat73 full deserialization
     data = load_mat_file(info_path)
 
-    # Info files have a single field containing the data dict
-    # Find the main field (not __header__, __version__, __globals__)
     info_data = None
     for key in data:
         if not key.startswith('_'):
@@ -135,7 +224,6 @@ def load_info_file(info_path: Path) -> List[Dict]:
             f"Expected dict, got {type(info_data).__name__} in {info_path}"
         )
 
-    # Validate required fields
     for field in ('Subj_Name', 'Subj_SegIDX'):
         if field not in info_data:
             raise ValueError(f"Missing required field '{field}' in {info_path}")
@@ -143,7 +231,6 @@ def load_info_file(info_path: Path) -> List[Dict]:
     n_segments = len(info_data['Subj_Name'])
     logger.info(f"  Found {n_segments} segment entries in {info_path.name}")
 
-    # Unwrap helpers for the nested [value] structure
     def unwrap_str(lst, idx, default='Unknown'):
         try:
             val = lst[idx]
@@ -158,7 +245,6 @@ def load_info_file(info_path: Path) -> List[Dict]:
         except (IndexError, TypeError, ValueError):
             return default
 
-    # Check which optional fields are present
     has_source = 'Source' in info_data
     has_sbp = 'Seg_SBP' in info_data
     has_dbp = 'Seg_DBP' in info_data
