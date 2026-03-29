@@ -39,6 +39,72 @@ def load_mat_file(path: Path) -> Dict:
         return loadmat(str(path), squeeze_me=True)
 
 
+def load_subject_signals_h5py(
+    path: Path,
+    seg_indices: List[int],
+    fields: List[str],
+) -> Dict[int, Dict[str, np.ndarray]]:
+    """
+    Load specific signal fields for specific segments using h5py.
+
+    MATLAB v7.3 .mat files store struct arrays as HDF5 object references.
+    This reads only the requested fields for the requested segments,
+    avoiding full deserialization (~30x faster than mat73.loadmat).
+
+    Layout (confirmed by probe):
+      /Subj_Wins/<field> -- Dataset, shape (1, N), dtype=object (references)
+      Each ref dereferences to Dataset, shape (1, 1250), dtype=float64
+
+    Args:
+        path: Path to the subject .mat file
+        seg_indices: 1-indexed segment indices (MATLAB convention)
+        fields: Field names to extract (e.g., ['PPG_Record', 'ECG_F', 'ABP_Raw'])
+
+    Returns:
+        {matlab_idx: {field_name: np.ndarray (1D, float64)}}
+        Missing fields -> empty arrays. Out-of-range indices omitted.
+    """
+    import h5py
+
+    result = {}
+    with h5py.File(str(path), 'r') as f:
+        if 'Subj_Wins' not in f:
+            raise ValueError(f"No 'Subj_Wins' in {path}: {list(f.keys())}")
+
+        sw = f['Subj_Wins']
+
+        # Determine segment count from the first available field
+        n_segs = None
+        for field_name in fields:
+            if field_name in sw:
+                ds = sw[field_name]
+                n_segs = ds.shape[1] if ds.ndim == 2 else ds.shape[0]
+                break
+
+        if n_segs is None:
+            return result
+
+        for matlab_idx in seg_indices:
+            py_idx = matlab_idx - 1
+            if py_idx < 0 or py_idx >= n_segs:
+                continue
+
+            seg_data = {}
+            for field_name in fields:
+                if field_name not in sw:
+                    seg_data[field_name] = np.array([], dtype=np.float64)
+                    continue
+
+                ds = sw[field_name]
+                ref = ds[0, py_idx] if ds.ndim == 2 else ds[py_idx]
+                data = f[ref][()].flatten().astype(np.float64)
+                seg_data[field_name] = data
+
+            result[matlab_idx] = seg_data
+
+    return result
+
+
 def load_info_file(info_path: Path) -> List[Dict]:
     """
     Load a PulseDB Info .mat file.
@@ -196,6 +262,9 @@ def generate_subset(
     n_processed = 0
     n_failed = 0
 
+    import time as _time
+    t_start = _time.time()
+
     for subj_name, seg_indices in subject_segments.items():
         subj_id = subj_name.split('_')[0]  # "p072634_0" -> "p072634"
         source = subject_source.get(subj_name, 'MIMIC')
@@ -210,81 +279,68 @@ def generate_subset(
             n_failed += 1
             continue
 
+        target_fields = [signal_fields['ppg'], signal_fields['ecg'], signal_fields['abp']]
+
+        # Fast path: h5py targeted reads (only 3 fields, only needed segments)
         try:
-            seg_data = load_mat_file(seg_path)
+            seg_signals = load_subject_signals_h5py(seg_path, seg_indices, target_fields)
         except Exception as e:
-            logger.error(f"  Failed to load {seg_path}: {e}")
-            n_failed += 1
-            continue
+            logger.debug(f"  h5py failed for {seg_path}, falling back to mat73: {e}")
+            # Slow fallback: mat73 full deserialization
+            try:
+                seg_data = load_mat_file(seg_path)
+            except Exception as e2:
+                logger.error(f"  Failed to load {seg_path}: {e2}")
+                n_failed += 1
+                continue
 
-        # Navigate to the segments structure
-        if 'Subj_Wins' not in seg_data:
-            logger.warning(f"  No 'Subj_Wins' in {seg_path}: {list(seg_data.keys())}")
-            n_failed += 1
-            continue
+            if 'Subj_Wins' not in seg_data:
+                logger.warning(f"  No 'Subj_Wins' in {seg_path}: {list(seg_data.keys())}")
+                n_failed += 1
+                continue
 
-        segments = seg_data['Subj_Wins']
-
-        # Normalize: mat73 loads struct arrays as dict-of-lists (column-oriented).
-        # Convert to list-of-dicts (row-oriented) for uniform segment indexing.
-        if isinstance(segments, dict):
-            field_names = list(segments.keys())
-            n_segs = len(next(iter(segments.values())))
-            segments = [
-                {k: segments[k][i] for k in field_names}
-                for i in range(n_segs)
-            ]
+            segments = seg_data['Subj_Wins']
+            if isinstance(segments, dict):
+                field_names_mat = list(segments.keys())
+                n_segs = len(next(iter(segments.values())))
+                seg_signals = {}
+                for idx in seg_indices:
+                    py_idx = idx - 1
+                    if 0 <= py_idx < n_segs:
+                        seg_signals[idx] = {
+                            fn: np.array(segments[fn][py_idx], dtype=np.float64).flatten()
+                            if fn in segments else np.array([], dtype=np.float64)
+                            for fn in target_fields
+                        }
 
         for idx in seg_indices:
-            try:
-                # MATLAB is 1-indexed, Python is 0-indexed
-                py_idx = idx - 1
-                if py_idx < 0 or py_idx >= len(segments):
-                    logger.debug(f"  Segment {idx} out of range for {subj_name} (has {len(segments)})")
-                    continue
-
-                seg = segments[py_idx]
-
-                # Use metadata from Info file (already parsed, official PulseDB values)
-                meta = subject_meta.get((subj_name, idx), {})
-                sbp = meta.get('sbp', np.nan)
-                dbp = meta.get('dbp', np.nan)
-                age = meta.get('age', np.nan)
-                gender = meta.get('gender', 'Unknown')
-
-                # Extract all 3 signals (PPG required, ECG/ABP optional)
-                def get_signal(seg, field_name):
-                    if isinstance(seg, dict):
-                        val = seg.get(field_name, [])
-                    elif hasattr(seg, field_name):
-                        val = getattr(seg, field_name)
-                    else:
-                        return np.array([], dtype=np.float64)
-                    return np.array(val, dtype=np.float64).flatten()
-
-                ppg = get_signal(seg, signal_fields['ppg'])
-                ecg = get_signal(seg, signal_fields['ecg'])
-                abp = get_signal(seg, signal_fields['abp'])
-
-                if len(ppg) == 0:
-                    continue
-
-                subjects.append(subj_name)
-                ppg_signals.append(ppg)
-                ecg_signals.append(ecg)
-                abp_signals.append(abp)
-                sbp_values.append(sbp)
-                dbp_values.append(dbp)
-                ages.append(age)
-                genders.append(gender)
-
-            except (IndexError, KeyError, TypeError) as e:
-                logger.debug(f"  Segment {idx} error for {subj_name}: {e}")
+            if idx not in seg_signals:
                 continue
+
+            signals = seg_signals[idx]
+            meta = subject_meta.get((subj_name, idx), {})
+
+            ppg = signals.get(signal_fields['ppg'], np.array([], dtype=np.float64))
+            ecg = signals.get(signal_fields['ecg'], np.array([], dtype=np.float64))
+            abp = signals.get(signal_fields['abp'], np.array([], dtype=np.float64))
+
+            if len(ppg) == 0:
+                continue
+
+            subjects.append(subj_name)
+            ppg_signals.append(ppg)
+            ecg_signals.append(ecg)
+            abp_signals.append(abp)
+            sbp_values.append(meta.get('sbp', np.nan))
+            dbp_values.append(meta.get('dbp', np.nan))
+            ages.append(meta.get('age', np.nan))
+            genders.append(meta.get('gender', 'Unknown'))
 
         n_processed += 1
         if n_processed % 100 == 0:
-            logger.info(f"  Processed {n_processed}/{n_subjects} subjects ({len(subjects)} segments)")
+            elapsed = _time.time() - t_start
+            rate = n_processed / elapsed
+            logger.info(f"  Processed {n_processed}/{n_subjects} subjects ({len(subjects)} segments) [{rate:.1f} subj/s]")
 
     logger.info(f"  Final: {len(subjects)} segments from {n_processed} subjects ({n_failed} failed)")
 
