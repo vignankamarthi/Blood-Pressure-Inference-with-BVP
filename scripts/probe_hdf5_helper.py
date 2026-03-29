@@ -165,6 +165,111 @@ def probe_file(path: str, label: str):
             print(f"  Estimated speedup: ~{30.0 / max(t_all, 0.001):.0f}x")
 
 
+def probe_info_file(path: str):
+    """Dump HDF5 structure of a PulseDB Info .mat file."""
+    print(f"\n{'='*60}")
+    print(f"Probing INFO file: {path}")
+    print(f"File size: {os.path.getsize(path) / 1e6:.1f} MB")
+    print(f"{'='*60}")
+
+    with h5py.File(path, 'r') as f:
+        print(f"\nTop-level keys: {list(f.keys())}")
+
+        # Find main data key (not #refs#)
+        main_key = None
+        for k in f.keys():
+            if not k.startswith('#'):
+                main_key = k
+                break
+
+        if main_key is None:
+            print("ERROR: No data key found")
+            return
+
+        print(f"\nMain key: '{main_key}'")
+        main = f[main_key]
+        print(f"Type: {type(main).__name__}")
+
+        if isinstance(main, h5py.Group):
+            print(f"Sub-keys ({len(main)}): {sorted(main.keys())}")
+
+            # Inspect each field we care about
+            target_fields = ['Subj_Name', 'Subj_SegIDX', 'Source',
+                             'Seg_SBP', 'Seg_DBP', 'Subj_Age', 'Subj_Gender']
+            for field_name in target_fields:
+                print(f"\n--- {field_name} ---")
+                if field_name not in main:
+                    print("  NOT FOUND")
+                    continue
+
+                ds = main[field_name]
+                print(f"  type: {type(ds).__name__}")
+                if isinstance(ds, h5py.Dataset):
+                    print(f"  shape: {ds.shape}")
+                    print(f"  dtype: {ds.dtype}")
+
+                    if ds.dtype == h5py.ref_dtype:
+                        print(f"  ** Object references **")
+                        # Deref first 2 elements
+                        for i in [0, 1]:
+                            try:
+                                ref = ds[0, i] if ds.ndim == 2 else ds[i]
+                                derefed = f[ref]
+                                print(f"  Deref [{i}]: type={type(derefed).__name__}", end="")
+                                if isinstance(derefed, h5py.Dataset):
+                                    data = derefed[()]
+                                    print(f", shape={data.shape}, dtype={data.dtype}")
+                                    # Try to decode if uint16 (likely string)
+                                    if data.dtype in (np.uint16, np.uint8):
+                                        try:
+                                            s = ''.join(chr(c) for c in data.flatten())
+                                            print(f"  Decoded string: '{s}'")
+                                        except Exception:
+                                            print(f"  Raw values: {data.flatten()[:10]}")
+                                    else:
+                                        print(f"  Values: {data.flatten()[:5]}")
+                                else:
+                                    print()
+                            except Exception as e:
+                                print(f"  Deref [{i}] failed: {e}")
+                    else:
+                        print(f"  Direct data")
+                        try:
+                            data = ds[()]
+                            print(f"  Shape: {data.shape}")
+                            print(f"  First 5: {data.flatten()[:5]}")
+                        except Exception as e:
+                            print(f"  Read failed: {e}")
+
+            # Timing: read all 7 target fields for first 100 entries
+            print(f"\n--- Timing ---")
+            start = time.time()
+            count = 0
+            for field_name in target_fields:
+                if field_name not in main:
+                    continue
+                ds = main[field_name]
+                if ds.dtype == h5py.ref_dtype:
+                    n = min(100, ds.shape[1] if ds.ndim == 2 else ds.shape[0])
+                    for i in range(n):
+                        ref = ds[0, i] if ds.ndim == 2 else ds[i]
+                        _ = f[ref][()]
+                    count = n
+            elapsed = time.time() - start
+            print(f"  7 fields x {count} entries: {elapsed:.4f}s")
+            if count > 0:
+                print(f"  Per-entry: {elapsed / count:.6f}s")
+
+                # Extrapolate for full file
+                total_entries = ds.shape[1] if ds.ndim == 2 else ds.shape[0]
+                est_total = (elapsed / count) * total_entries
+                print(f"  Total entries: {total_entries}")
+                print(f"  Estimated full read: {est_total:.1f}s")
+
+        elif isinstance(main, h5py.Dataset):
+            print(f"Shape: {main.shape}, dtype: {main.dtype}")
+
+
 def main():
     data_dir = os.environ.get('DATA_DIR', 'data/raw')
 
@@ -186,6 +291,14 @@ def main():
         print(f"  Checked: {mimic_dir}")
         print(f"  Checked: {vital_dir}")
         sys.exit(1)
+
+    # Probe Info files (use smallest first for quick validation)
+    info_dir = Path(data_dir) / "Info_Files"
+    if info_dir.exists():
+        info_files = sorted(info_dir.glob("*.mat"), key=lambda p: p.stat().st_size)
+        # Probe the smallest Info file (AAMI_Test_Info.mat ~4.8 MB)
+        if info_files:
+            probe_info_file(str(info_files[0]))
 
     print(f"\n{'='*60}")
     print("Probe complete.")
