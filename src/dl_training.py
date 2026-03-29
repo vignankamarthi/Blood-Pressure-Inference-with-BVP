@@ -6,7 +6,6 @@ Resume from any checkpoint.
 
 import json
 import logging
-import time
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -15,7 +14,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from .utils import atomic_json_write, load_json, clear_memory
+from .utils import atomic_json_write
 
 logger = logging.getLogger("bp_pipeline")
 

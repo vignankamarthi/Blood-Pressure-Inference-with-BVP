@@ -5,7 +5,7 @@ Metrics: ME, SD, MAE, RMSE, R^2, Median AE, Max Error, AAMI, BHS, Bland-Altman.
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict
 
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score, median_absolute_error, max_error

@@ -16,14 +16,11 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.utils import setup_logging, timer, clear_memory
+from src.utils import setup_logging, timer
 from src.data_loader import load_cached_features, prepare_train_test, get_feature_columns
 from src.models import train_all, load_status
 from src.tuning import tune_all
 from src.evaluation import evaluate_model, generate_leaderboard
-
-import numpy as np
-import joblib
 
 
 def parse_args():

@@ -5,12 +5,10 @@ Every model checkpointed at ~30-second granularity.
 """
 
 import logging
-import time
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import joblib
-import numpy as np
 from sklearn.linear_model import Ridge
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor

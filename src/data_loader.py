@@ -2,14 +2,14 @@
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 import joblib
 
-from .utils import atomic_json_write, load_json, timer
+from .utils import timer
 
 logger = logging.getLogger("bp_pipeline")
 
@@ -105,51 +105,3 @@ def prepare_train_test(
     return X_train, y_train, X_test, y_test, scaler
 
 
-def load_pulsedb_mat(mat_dir: Path) -> pd.DataFrame:
-    """
-    Load PulseDB v2.0 .mat files.
-    Extracts raw PPG segments + SBP/DBP labels.
-
-    GATE G5: If .mat structure differs from docs, STOP.
-    """
-    try:
-        import mat73
-    except ImportError:
-        raise ImportError("mat73 required for loading PulseDB .mat files. pip install mat73")
-
-    logger.info(f"Loading PulseDB from {mat_dir}")
-    records = []
-
-    mat_files = sorted(mat_dir.glob("*.mat"))
-    logger.info(f"  Found {len(mat_files)} .mat files")
-
-    for mat_file in mat_files:
-        try:
-            data = mat73.loadmat(str(mat_file))
-            # Expected fields: PPG_Record, SBP, DBP, subject_id
-            # GATE G5: verify structure
-            if "PPG_Record" not in data and "ppg" not in data:
-                logger.warning(f"  GATE G5: Unexpected .mat structure in {mat_file.name}: {list(data.keys())}")
-                continue
-
-            ppg_key = "PPG_Record" if "PPG_Record" in data else "ppg"
-            ppg = np.array(data[ppg_key])
-
-            if ppg.ndim == 1:
-                ppg = ppg.reshape(-1, 1)
-
-            n_segments = ppg.shape[1] if ppg.ndim > 1 else 1
-
-            for seg_idx in range(n_segments):
-                segment = ppg[:, seg_idx] if ppg.ndim > 1 else ppg
-                records.append({
-                    "file_name": mat_file.stem,
-                    "segment_id": f"{mat_file.stem}_seg{seg_idx:04d}",
-                    "signal": segment.tolist(),
-                    "signal_length": len(segment),
-                })
-        except Exception as e:
-            logger.error(f"  Failed to load {mat_file.name}: {e}")
-
-    logger.info(f"  Loaded {len(records)} segments")
-    return pd.DataFrame(records)

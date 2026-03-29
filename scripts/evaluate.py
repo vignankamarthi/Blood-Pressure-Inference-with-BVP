@@ -10,13 +10,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.utils import setup_logging, timer
+from src.utils import setup_logging
 from src.data_loader import load_cached_features, prepare_train_test
 from src.evaluation import evaluate_model, generate_leaderboard, stratified_evaluation, bland_altman
 
 import joblib
 import json
-import numpy as np
 
 
 def main():
