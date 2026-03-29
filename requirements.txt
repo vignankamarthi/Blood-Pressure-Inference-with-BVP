@@ -5,6 +5,7 @@ scipy>=1.10.0
 
 # Data loading
 mat73>=0.62
+h5py>=3.8.0
 pyarrow>=14.0.0
 
 # Feature extraction (Python reference only -- Rust is primary)
