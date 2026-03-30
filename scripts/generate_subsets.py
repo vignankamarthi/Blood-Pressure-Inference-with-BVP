@@ -334,15 +334,18 @@ def generate_subset(
         'abp': 'ABP_Raw',
     }
 
-    # Pre-allocate output lists
+    # Pre-allocate fixed-size 2D arrays (all signals are 1250 samples)
+    SIGNAL_LEN = 1250
+    n_total = len(info_records)  # upper bound on segments
+    ppg_arr = np.zeros((n_total, SIGNAL_LEN), dtype=np.float64)
+    ecg_arr = np.zeros((n_total, SIGNAL_LEN), dtype=np.float64)
+    abp_arr = np.zeros((n_total, SIGNAL_LEN), dtype=np.float64)
+    sbp_arr = np.full(n_total, np.nan, dtype=np.float64)
+    dbp_arr = np.full(n_total, np.nan, dtype=np.float64)
+    age_arr = np.full(n_total, np.nan, dtype=np.float64)
     subjects = []
-    ppg_signals = []
-    ecg_signals = []
-    abp_signals = []
-    sbp_values = []
-    dbp_values = []
-    ages = []
     genders = []
+    write_idx = 0
 
     n_subjects = len(subject_segments)
     n_processed = 0
@@ -413,34 +416,38 @@ def generate_subset(
             if len(ppg) == 0:
                 continue
 
+            # Write directly into pre-allocated arrays (no list overhead)
+            sig_len = min(len(ppg), SIGNAL_LEN)
+            ppg_arr[write_idx, :sig_len] = ppg[:sig_len]
+            ecg_arr[write_idx, :min(len(ecg), SIGNAL_LEN)] = ecg[:SIGNAL_LEN] if len(ecg) > 0 else 0
+            abp_arr[write_idx, :min(len(abp), SIGNAL_LEN)] = abp[:SIGNAL_LEN] if len(abp) > 0 else 0
+            sbp_arr[write_idx] = meta.get('sbp', np.nan)
+            dbp_arr[write_idx] = meta.get('dbp', np.nan)
+            age_arr[write_idx] = meta.get('age', np.nan)
             subjects.append(subj_name)
-            ppg_signals.append(ppg)
-            ecg_signals.append(ecg)
-            abp_signals.append(abp)
-            sbp_values.append(meta.get('sbp', np.nan))
-            dbp_values.append(meta.get('dbp', np.nan))
-            ages.append(meta.get('age', np.nan))
             genders.append(meta.get('gender', 'Unknown'))
+            write_idx += 1
 
         n_processed += 1
         if n_processed % 100 == 0:
             elapsed = _time.time() - t_start
             rate = n_processed / elapsed
-            logger.info(f"  Processed {n_processed}/{n_subjects} subjects ({len(subjects)} segments) [{rate:.1f} subj/s]")
+            logger.info(f"  Processed {n_processed}/{n_subjects} subjects ({write_idx} segments) [{rate:.1f} subj/s]")
 
-    logger.info(f"  Final: {len(subjects)} segments from {n_processed} subjects ({n_failed} failed)")
+    logger.info(f"  Final: {write_idx} segments from {n_processed} subjects ({n_failed} failed)")
 
-    # Save as numpy arrays (more portable than .mat for our pipeline)
+    # Trim to actual size and save (uncompressed -- float signals don't compress well)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
+    logger.info(f"  Saving {write_idx} segments to {output_path}...")
+    np.savez(
         str(output_path),
         subjects=np.array(subjects),
-        ppg_signals=np.array(ppg_signals, dtype=object),  # variable length
-        ecg_signals=np.array(ecg_signals, dtype=object),
-        abp_signals=np.array(abp_signals, dtype=object),
-        sbp=np.array(sbp_values, dtype=np.float64),
-        dbp=np.array(dbp_values, dtype=np.float64),
-        ages=np.array(ages, dtype=np.float64),
+        ppg_signals=ppg_arr[:write_idx],
+        ecg_signals=ecg_arr[:write_idx],
+        abp_signals=abp_arr[:write_idx],
+        sbp=sbp_arr[:write_idx],
+        dbp=dbp_arr[:write_idx],
+        ages=age_arr[:write_idx],
         genders=np.array(genders),
     )
     logger.info(f"  Saved to {output_path}")
