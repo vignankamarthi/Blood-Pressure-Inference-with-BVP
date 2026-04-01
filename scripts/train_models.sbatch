@@ -23,16 +23,18 @@ mkdir -p logs
 
 CONFIG="${CONFIG:-ppg}"
 MODELS="${MODELS:-ridge,dt,rf,xgb,lgbm}"
+FEATURES="${FEATURES:-data/features/$CONFIG/features_labeled.csv}"
 SCRATCH_DIR="/scratch/kamarthi.v/bp-checkpoints"
 
 echo "=== Model Training ==="
 echo "Job ID: $SLURM_JOB_ID"
-echo "Config: $CONFIG | Models: $MODELS"
+echo "Config: $CONFIG | Models: $MODELS | Features: $FEATURES"
 echo "Start: $(date)"
 
 python scripts/train_models.py \
     --config "$CONFIG" \
     --models "$MODELS" \
+    --features "$FEATURES" \
     --checkpoint-dir "$SCRATCH_DIR" \
     --results-dir results \
     --resume
@@ -41,7 +43,7 @@ echo "=== Training Complete ==="
 echo "End: $(date)"
 
 python scripts/evaluate.py \
-    --features "data/features/$CONFIG/features_labeled.csv" \
+    --features "$FEATURES" \
     --checkpoint-dir "$SCRATCH_DIR/$CONFIG" \
     --results-dir "results/$CONFIG"
 
