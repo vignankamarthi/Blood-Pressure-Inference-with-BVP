@@ -76,8 +76,7 @@ for SIGNAL in ppg ecg abp; do
             --workers "$SLURM_CPUS_PER_TASK" \
             --dimensions 7 \
             --delays 2 \
-            $RESUME_FLAG \
-            -v 1
+            $RESUME_FLAG
 
         echo "[$SIGNAL/$SUBSET_NAME] Done: $(date)"
         echo ""
