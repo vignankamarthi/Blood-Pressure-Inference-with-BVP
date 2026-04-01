@@ -6,8 +6,8 @@
 
 ## Experiment Overview
 
-Two-track experiment with 4-configuration ablation study.
-34 total model trainings across feature engineering and deep learning.
+Two-track experiment: classical ML with signal ablation + deep learning on raw PPG.
+72 total model evaluations + GradientSHAP interpretability analysis.
 
 ```
 PulseDB v2.0 (5.2M segments, 5,361 subjects, 125 Hz)
@@ -22,48 +22,33 @@ PulseDB v2.0 (5.2M segments, 5,361 subjects, 125 Hz)
     |                                          |
     v                                          v
 TRACK 1: Feature Engineering + ML          TRACK 2: Deep Learning
-(CPU, 56 cores)                            (GPU, V100/H200)
+(CPU, 56 cores)                            (GPU, H200/A100)
     |                                          |
     v                                          v
-Rust Feature Extraction              Raw 1250-point windows
-40 features per signal:              directly to neural networks
+Rust Feature Extraction              Raw PPG waveform only
+40 features per signal:              1250 samples at 125 Hz
   Catch22 (22)                       No feature extraction
-  Entropy (10)                           |
-  Stats (8)                              v
-    |                                4 Architectures:
-    v                                  1D CNN
-StandardScaler                         LSTM
-(per column, train only)               CNN-LSTM
-    |                                  Transformer
-    v                                    |
-5 Models:                                |
-  Ridge                                  |
-  Decision Tree                          |
-  Random Forest                          |
-  XGBoost                                |
-  LightGBM                               |
+  Entropy (10)                       DL learns its own features
+  Stats (8)                              |
+    |                                    v
+    v                                2 Architectures:
+StandardScaler                         ResNet-BiGRU (primary)
+(per column, train only)               ResNet-1D (baseline)
     |                                    |
-    +================+=================+
-                     |
-                     v
-          2-PHASE EXPERIMENT
-    |
-    v
-Phase 1: PPG-Only Championship (18 trainings)
-  5 ML + 4 DL models, both SBP and DBP
-  Crown best ML model and best DL model
-    |
-    v
-Phase 2: Ablation with Champions (16 trainings)
-  Best ML + best DL across 4 signal configs:
-    |
-    +-- PPG only          (40 ML features / 1250x1 DL)
-    +-- PPG + ECG         (80 ML features / 1250x2 DL)
-    +-- PPG + ABP         (80 ML features / 1250x2 DL)
-    +-- PPG + ECG + ABP   (120 ML features / 1250x3 DL)
-    |
-    v
-EVALUATION (clinical standards)
+    v                                    v
+5 Models (x4 signal configs):       PPG only (no ablation):
+  Ridge                              Both SBP and DBP targets
+  Decision Tree                          |
+  Random Forest                          v
+  XGBoost                           GradientSHAP
+  LightGBM                          Temporal importance maps
+    |                                (which PPG regions -> BP)
+    |                                    |
+    +=================+=================+
+                      |
+                      v
+           EVALUATION (same for both tracks)
+             CalFree + CalBased + AAMI test sets
 ```
 
 ---
@@ -84,6 +69,11 @@ EVALUATION (clinical standards)
 |  Labels: SBP/DBP derived from ABP waveform                   |
 |  Pre-defined subject-level train/test splits                 |
 |  Sampling rate: 125 Hz, segment length: 1250 points          |
+|                                                               |
+|  Loaded via h5py targeted reads (not mat73):                 |
+|    Subject files: 21-223x speedup over mat73                 |
+|    Info files: targeted field reads on 3.4 GB HDF5           |
+|  Stored as pre-allocated 2D float64 .npz arrays             |
 +---------------------------------------------------------------+
 ```
 
@@ -98,6 +88,7 @@ EVALUATION (clinical standards)
 |                                                               |
 |  Applied to each signal independently (PPG, ECG, ABP)        |
 |  Same 40 features extracted from raw signal -- no pre-norm    |
+|  Runs per-subset with per-directory checkpointing            |
 |                                                               |
 |  +------------------+  +----------------+  +--------------+  |
 |  | Catch22 (22)     |  | Entropy (10)   |  | Stats (8)    |  |
@@ -119,6 +110,7 @@ EVALUATION (clinical standards)
 |    - Each feature independently normalized (mean=0, std=1)    |
 |    - Fitted on training subjects ONLY                         |
 |    - Required for Ridge, neutral for trees                    |
+|  Key-based merge: (file_name, segment_id) -> .npz labels     |
 |  Subject-level train/test separation enforced                 |
 +---------------------------------------------------------------+
                             |
@@ -140,70 +132,98 @@ EVALUATION (clinical standards)
 |  XGBoost      -- gradient boosting (Newton step)              |
 |  LightGBM     -- histogram boosting (5.2M row efficiency)     |
 |                                                               |
+|  Signal Ablation (4 configs):                                |
+|    PPG only (40 features)                                    |
+|    PPG + ECG (80 features)                                   |
+|    PPG + ABP (80 features)                                   |
+|    PPG + ECG + ABP (120 features)                            |
+|                                                               |
 |  All with exhaustive checkpointing:                           |
 |    RF: every 50 trees | XGB: every 25 rounds                 |
 |    LGB: every 25 iters | Optuna: per trial (SQLite)          |
+|                                                               |
+|  Interpretability: impurity/gain (trees), coefficients (Ridge)|
 +---------------------------------------------------------------+
 ```
 
 ---
 
-## Track 2: Deep Learning on Raw Signals
+## Track 2: Deep Learning on Raw PPG
 
 ```
 +---------------------------------------------------------------+
-|              RAW SIGNAL INPUT (no feature extraction)          |
+|              RAW SIGNAL INPUT (PPG only)                      |
 |                                                               |
-|  Input shape depends on ablation config:                      |
-|    PPG only:      1250 x 1 channels                          |
-|    PPG + ECG:     1250 x 2 channels                          |
-|    PPG + ABP:     1250 x 2 channels                          |
-|    All three:     1250 x 3 channels                          |
+|  Input: (batch, 1, 1250) -- single-channel raw PPG           |
+|  No multi-signal ablation for DL                             |
+|  DL learns its own features end-to-end from the waveform     |
 |                                                               |
 |  Per-channel StandardScaler (fit on training subjects only)   |
 +---------------------------------------------------------------+
                             |
                             v
 +---------------------------------------------------------------+
-|           DL MODEL TRAINING (GPU, V100/H200)                  |
+|           DL MODEL TRAINING (GPU, H200/A100)                  |
 |          Separate models for SBP and DBP                      |
 |                                                               |
-|  1D CNN       -- Conv1D layers detect local pulse patterns    |
-|  LSTM         -- Captures temporal dependencies               |
-|  CNN-LSTM     -- Hybrid: local + temporal                     |
-|  Transformer  -- Multi-head attention on time series          |
+|  ResNet-BiGRU  -- 1D residual blocks capture morphological    |
+|    (primary)      features (waveform shape), bidirectional    |
+|                   GRU captures temporal dependencies across   |
+|                   the full 10-second window (beat-to-beat)    |
+|                   Fan 2026: MAE 4.78/2.98 on VitalDB         |
 |                                                               |
-|  All models: MSE loss, Adam, LR scheduling, early stopping   |
+|  ResNet-1D     -- 1D residual blocks + global avg pool       |
+|    (baseline)     No temporal component (ablation baseline)   |
+|                   Moulaeifard 2025: best on PulseDB           |
+|                                                               |
+|  MSE loss, Adam, LR scheduling, early stopping               |
 |  Checkpointing: model + optimizer state every epoch           |
-|  Optuna: architecture + hyperparameter search (100 trials)    |
++---------------------------------------------------------------+
+                            |
+                            v
++---------------------------------------------------------------+
+|           INTERPRETABILITY (GradientSHAP)                     |
+|                                                               |
+|  GradientSHAP via captum (PyTorch-native)                    |
+|  Approximates Shapley values using integrated gradients       |
+|  with stochastic baselines                                   |
+|                                                               |
+|  Output: per-timestep importance map (1250 values)           |
+|    Shows which regions of the PPG waveform drive BP prediction|
+|    Expected: dicrotic notch / reflected wave regions          |
+|    (arterial stiffness correlates with BP)                   |
+|                                                               |
+|  Novel contribution: no prior work applies GradientSHAP      |
+|  directly to raw PPG temporal maps for BP estimation         |
 +---------------------------------------------------------------+
 ```
 
 ---
 
-## Ablation Study Design
+## Experiment Matrix
 
 ```
 +---------------------------------------------------------------+
-|               2-PHASE EXPERIMENT DESIGN                       |
+|                   EXPERIMENT DESIGN                           |
 |                                                               |
-|  PHASE 1: PPG-Only Championship (18 trainings)               |
-|    5 ML models x 2 targets (SBP, DBP) = 10                  |
-|    4 DL models x 2 targets (SBP, DBP) = 8                   |
-|    --> Crown best ML model and best DL model                 |
+|  CLASSICAL ML (Track 1):                                     |
+|    5 models x 4 signal configs x 2 targets x 3 test sets    |
+|    = 60 evaluations                                          |
+|    Ablation answers: does adding ECG/ABP to Catch22          |
+|    features improve over PPG alone?                          |
 |                                                               |
-|  PHASE 2: Ablation with Champions (16 trainings)             |
-|    Best ML x 4 configs x 2 targets = 8                       |
-|    Best DL x 4 configs x 2 targets = 8                       |
+|  DEEP LEARNING (Track 2):                                    |
+|    2 architectures x 1 signal (PPG) x 2 targets x 3 tests   |
+|    = 12 evaluations                                          |
+|    Comparison answers: does ResNet-BiGRU's temporal           |
+|    modeling outperform ResNet-1D's local-only approach?       |
 |                                                               |
-|  Configs:                                                     |
-|    A. PPG only          (cuffless wearable)                   |
-|    B. PPG + ECG         (does ECG help?)                      |
-|    C. PPG + ABP         (gold standard ceiling)               |
-|    D. PPG + ECG + ABP   (absolute upper bound)               |
+|  CROSS-TRACK:                                                |
+|    Best classical (feature-engineered) vs best DL (raw PPG)  |
+|    Both on PPG-only for fair comparison                      |
+|    Interpretability: impurity/gain vs GradientSHAP maps      |
 |                                                               |
-|  Question answered: Is PPG alone sufficient for               |
-|  clinically meaningful BP estimation?                         |
+|  TOTAL: 72 evaluations + GradientSHAP analysis              |
 +---------------------------------------------------------------+
 ```
 
@@ -225,12 +245,14 @@ EVALUATION (clinical standards)
 |  Analysis:                                                    |
 |    Bland-Altman agreement plots                               |
 |    Error stratified by BP category                            |
-|    Feature importance (Track 1 models)                        |
-|    Cross-track comparison (ML vs DL)                          |
-|    Cross-config comparison (ablation results)                 |
-|    Subject-level aggregation                                  |
+|    Feature importance -- impurity/gain (classical models)     |
+|    GradientSHAP temporal maps (DL models)                    |
+|    Cross-track comparison (classical ML vs DL)                |
+|    Cross-config comparison (ablation results, Track 1 only)   |
 |                                                               |
 |  Generalization:                                              |
-|    Calibration-based and calibration-free test sets            |
+|    CalFree (primary -- hardest, no subject calibration)       |
+|    CalBased (calibration data available)                      |
+|    AAMI (clinical standard test set)                         |
 +---------------------------------------------------------------+
 ```

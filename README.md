@@ -23,21 +23,21 @@ PulseDB v2.0 (5.2M segments, 5,361 subjects, 125 Hz)
     |                                          |
     v                                          v
 TRACK 1: Feature Engineering + ML          TRACK 2: Deep Learning
-(CPU, 56 cores)                            (GPU, V100/H200)
+(CPU, 56 cores)                            (GPU, H200/A100)
     |                                          |
     v                                          v
-Rust Feature Extraction              Raw 1250-point windows
-40 features per signal:              directly to neural networks
-  Catch22 (22)                           |
-  Entropy (10)                           v
-  Stats (8)                          4 Architectures:
-    |                                  1D CNN
-    v                                  LSTM
-StandardScaler                         CNN-LSTM
-(per column, train only)               Transformer
-    |                                    |
-    v                                    |
-5 Models:                                |
+Rust Feature Extraction              Raw PPG waveform only
+40 features per signal:              1250 samples, 1 channel
+  Catch22 (22)                       DL learns its own features
+  Entropy (10)                           |
+  Stats (8)                              v
+    |                                2 Architectures:
+    v                                  ResNet-BiGRU (primary)
+StandardScaler                         ResNet-1D (baseline)
+(per column, train only)                 |
+    |                                    v
+    v                                GradientSHAP
+5 Models x 4 signal configs:        temporal importance maps
   Ridge                                  |
   Decision Tree                          |
   Random Forest                          |
@@ -47,21 +47,20 @@ StandardScaler                         CNN-LSTM
     +================+=================+
                      |
                      v
-          2-PHASE EXPERIMENT
+              EVALUATION
                      |
-    Phase 1: PPG-Only Championship
-      9 models (5 ML + 4 DL) x 2 targets = 18 trainings
-      Crown best ML model and best DL model
+    Classical ML: 5 models x 4 signal ablations x 2 targets
+      = 60 evaluations (CalFree + CalBased + AAMI)
+      Ablation: PPG | PPG+ECG | PPG+ABP | PPG+ECG+ABP
                      |
-    Phase 2: Ablation with Champions
-      Best ML + best DL x 4 configs x 2 targets = 16 trainings
-        +-- PPG only        (cuffless wearable)
-        +-- PPG + ECG       (does ECG help?)
-        +-- PPG + ABP       (gold standard ceiling)
-        +-- PPG + ECG + ABP (absolute upper bound)
+    Deep Learning: 2 architectures x PPG only x 2 targets
+      = 12 evaluations (CalFree + CalBased + AAMI)
+      No ablation -- DL on raw PPG end-to-end
+                     |
+    Cross-track: best classical vs best DL on PPG-only
                      |
                      v
-              EVALUATION
+         72 total evaluations + GradientSHAP
       MAE, RMSE, R-squared
       AAMI compliance (ME < 5, SD < 8 mmHg)
       BHS grading (A/B/C/D)
@@ -84,7 +83,7 @@ Blood-Pressure-Inference-with-BVP/
 │   ├── models.py                     # 5 ML models with per-model checkpointing
 │   ├── tuning.py                     # Optuna (SQLite persistence, auto-resume)
 │   ├── evaluation.py                 # AAMI, BHS, Bland-Altman, stratified eval
-│   ├── dl_models.py                  # 1D CNN, LSTM, CNN-LSTM, Transformer
+│   ├── dl_models.py                  # ResNet-BiGRU, ResNet-1D (raw PPG -> BP)
 │   ├── dl_training.py                # PyTorch training loop + checkpointing
 │   ├── dl_data.py                    # PyTorch Dataset for raw signal windows
 │   └── utils.py                      # Atomic writes, logging, serialization
