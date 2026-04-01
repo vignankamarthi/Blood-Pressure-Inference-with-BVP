@@ -2,12 +2,15 @@
 """
 Merge Rust-extracted feature CSVs with .npz subset labels into training-ready CSVs.
 
+Key-based merge using (file_name, segment_id) -> (subject, within-subject seg_idx).
+Produces one features_labeled.csv per (ablation_config, test_set) combination.
+
 For each ablation config (ppg, ppg_ecg, ppg_abp, ppg_ecg_abp):
-  - Load per-signal feature CSVs from data/features/{signal}/features.csv
-  - Prefix columns by signal name (ppg_dn_histogram_mode_5, ecg_dn_histogram_mode_5, etc.)
-  - Horizontal concat on (file_name, segment_id)
-  - Join with labels (SBP, DBP) and split assignments from .npz subsets
-  - Write data/features/{config}/features_labeled.csv
+  - Load per-subset feature CSVs from data/features/{signal}/{subset}/features.csv
+  - Prefix feature columns by signal name
+  - Horizontal merge across signals on (file_name, segment_id)
+  - Key-based join with .npz labels using parsed subject + seg_idx
+  - Write data/features/{config}/features_labeled[_{test_set}].csv
 
 Usage:
     python scripts/merge_features_labels.py --feature-dir data/features --subset-dir data/subsets
@@ -28,110 +31,120 @@ logger = None
 
 METADATA_COLS = {'file_name', 'segment_id', 'signal_length', 'nan_percentage'}
 
+# Which .npz provides labels for which subset directory
+SUBSET_NPZ_MAP = {
+    'Train_Subset': 'Train_Subset.npz',
+    'CalBased_Test_Subset': 'CalBased_Test_Subset.npz',
+    'CalFree_Test_Subset': 'CalFree_Test_Subset.npz',
+    'AAMI_Test_Subset': 'AAMI_Test_Subset.npz',
+    'AAMI_Cal_Subset': 'AAMI_Cal_Subset.npz',
+}
 
-def load_and_prefix(feature_csv: Path, signal_name: str) -> pd.DataFrame:
-    """Load a feature CSV and prefix all feature columns with the signal name."""
-    df = pd.read_csv(feature_csv)
+# Test sets to evaluate against (each paired with training data)
+TEST_SETS = ['CalFree_Test_Subset', 'CalBased_Test_Subset', 'AAMI_Test_Subset']
 
-    # Identify feature columns (everything not in METADATA_COLS)
-    feature_cols = [c for c in df.columns if c not in METADATA_COLS]
 
-    # Prefix feature columns
-    rename_map = {c: f"{signal_name}_{c}" for c in feature_cols}
-    df = df.rename(columns=rename_map)
+def parse_segment_key(file_name: str, segment_id: str):
+    """
+    Extract (subject, seg_idx) from Rust output columns.
 
+    file_name = "p072634_0.csv" -> subject = "p072634_0"
+    segment_id = "p072634_0_seg0003" -> seg_idx = 3
+    """
+    subject = file_name.replace('.csv', '')
+    seg_part = segment_id.rsplit('_seg', 1)[-1]
+    seg_idx = int(seg_part)
+    return subject, seg_idx
+
+
+def build_label_lookup(npz_path: Path) -> pd.DataFrame:
+    """
+    Build a DataFrame with (subject, seg_idx) -> (sbp, dbp) from an .npz file.
+
+    The .npz subjects array has one entry per segment. Within each subject,
+    seg_idx is the cumulative zero-based index (matching CSV column order
+    from export_signals_csv.py).
+    """
+    data = np.load(str(npz_path))
+    subjects = data['subjects']
+    sbp = data['sbp']
+    dbp = data['dbp']
+
+    df = pd.DataFrame({
+        'subject': subjects,
+        'sbp': sbp,
+        'dbp': dbp,
+    })
+    df['seg_idx'] = df.groupby('subject').cumcount()
     return df
 
 
-def merge_signals(feature_dir: Path, signals: list) -> pd.DataFrame:
-    """Merge feature CSVs from multiple signals into one DataFrame."""
+def load_and_prefix(feature_dir: Path, signal_name: str, subset_name: str) -> pd.DataFrame:
+    """Load a per-subset feature CSV and prefix feature columns with signal name."""
+    csv_path = feature_dir / signal_name / subset_name / "features.csv"
+    if not csv_path.exists():
+        logger.error(f"  Feature CSV not found: {csv_path}")
+        return None
+
+    df = pd.read_csv(csv_path)
+    logger.info(f"  Loaded {signal_name}/{subset_name}: {df.shape}")
+
+    # Prefix feature columns (not metadata)
+    feature_cols = [c for c in df.columns if c not in METADATA_COLS]
+    rename_map = {c: f"{signal_name}_{c}" for c in feature_cols}
+    df = df.rename(columns=rename_map)
+    return df
+
+
+def merge_signals(feature_dir: Path, signals: list, subset_name: str) -> pd.DataFrame:
+    """Merge feature CSVs from multiple signals for one subset on (file_name, segment_id)."""
     dfs = []
     for signal in signals:
-        csv_path = feature_dir / signal / "features.csv"
-        if not csv_path.exists():
-            logger.error(f"  Feature CSV not found: {csv_path}")
+        df = load_and_prefix(feature_dir, signal, subset_name)
+        if df is None:
             return None
-        df = load_and_prefix(csv_path, signal)
         dfs.append(df)
 
     if not dfs:
         return None
 
-    # Merge on (file_name, segment_id)
     merged = dfs[0]
     for df in dfs[1:]:
-        # Keep only prefixed feature columns from subsequent DataFrames
-        meta_cols_in_df = [c for c in df.columns if c in METADATA_COLS]
-        feature_cols_in_df = [c for c in df.columns if c not in METADATA_COLS]
         merge_keys = ['file_name', 'segment_id']
-        cols_to_merge = merge_keys + feature_cols_in_df
+        feature_cols = [c for c in df.columns if c not in METADATA_COLS]
+        cols_to_merge = merge_keys + feature_cols
         merged = merged.merge(df[cols_to_merge], on=merge_keys, how='inner')
 
-    logger.info(f"  Merged {len(signals)} signals: {merged.shape}")
     return merged
 
 
-def add_labels_and_split(
-    features_df: pd.DataFrame,
-    train_npz: Path,
-    test_npz: Path,
-) -> pd.DataFrame:
-    """Add SBP/DBP labels and train/test split column."""
-    # For now, the split assignment comes from which .npz the segment belongs to
-    # The features_df has (file_name, segment_id) which maps to subjects in .npz
-    # Since Rust extracts from the CSVs (which were exported from .npz subsets),
-    # we know the mapping: Train_Subset segments -> split="train",
-    # CalFree_Test_Subset segments -> split="test"
+def add_labels_keyed(features_df: pd.DataFrame, npz_path: Path) -> pd.DataFrame:
+    """
+    Key-based label merge using (subject, seg_idx) parsed from Rust output columns.
+    """
+    label_df = build_label_lookup(npz_path)
 
-    # Load labels from .npz
-    train_data = np.load(str(train_npz), allow_pickle=True)
-    test_data = np.load(str(test_npz), allow_pickle=True)
+    features_df = features_df.copy()
+    subjects = []
+    seg_indices = []
+    for _, row in features_df.iterrows():
+        subj, idx = parse_segment_key(row['file_name'], row['segment_id'])
+        subjects.append(subj)
+        seg_indices.append(idx)
 
-    # Build label lookup from subjects + segment indices
-    train_labels = pd.DataFrame({
-        'subject': train_data['subjects'],
-        'sbp': train_data['sbp'],
-        'dbp': train_data['dbp'],
-        'split': 'train',
-    })
+    features_df['subject'] = subjects
+    features_df['seg_idx'] = seg_indices
 
-    test_labels = pd.DataFrame({
-        'subject': test_data['subjects'],
-        'sbp': test_data['sbp'],
-        'dbp': test_data['dbp'],
-        'split': 'test',
-    })
+    merged = features_df.merge(label_df, on=['subject', 'seg_idx'], how='inner')
 
-    # Add segment index within each subject
-    for df in [train_labels, test_labels]:
-        df['seg_idx'] = df.groupby('subject').cumcount()
+    n_unmatched = len(features_df) - len(merged)
+    if n_unmatched > 0:
+        logger.warning(f"  {n_unmatched} feature rows did not match labels")
 
-    all_labels = pd.concat([train_labels, test_labels], ignore_index=True)
+    merged = merged.rename(columns={'subject': 'subject_id'})
+    merged = merged.drop(columns=['seg_idx'])
 
-    # The file_name in features_df corresponds to the CSV filename (subject.csv)
-    # The segment_id corresponds to the column name in that CSV (subject_segNNNN)
-    # We need to match these back to the .npz segment ordering
-
-    # For now, add labels by position (features_df rows should align with .npz order
-    # since export_signals_csv.py writes in the same order)
-    # This is a simplification -- in production, use explicit segment IDs
-
-    if len(features_df) <= len(all_labels):
-        features_df = features_df.copy()
-        features_df['sbp'] = all_labels['sbp'].values[:len(features_df)]
-        features_df['dbp'] = all_labels['dbp'].values[:len(features_df)]
-        features_df['split'] = all_labels['split'].values[:len(features_df)]
-        features_df['subject_id'] = all_labels['subject'].values[:len(features_df)]
-    else:
-        logger.warning(f"  Feature rows ({len(features_df)}) > label rows ({len(all_labels)})")
-        # Truncate to match
-        features_df = features_df.iloc[:len(all_labels)].copy()
-        features_df['sbp'] = all_labels['sbp'].values
-        features_df['dbp'] = all_labels['dbp'].values
-        features_df['split'] = all_labels['split'].values
-        features_df['subject_id'] = all_labels['subject'].values
-
-    return features_df
+    return merged
 
 
 def main():
@@ -151,30 +164,60 @@ def main():
     with open(args.config_path) as f:
         configs = json.load(f)
 
-    train_npz = subset_dir / "Train_Subset.npz"
-    test_npz = subset_dir / "CalFree_Test_Subset.npz"
-
     for config_name, config in configs.items():
         signals = config["signals"]
         logger.info(f"Config '{config_name}': signals={signals}")
 
-        merged = merge_signals(feature_dir, signals)
-        if merged is None:
-            logger.error(f"  Skipping config '{config_name}' -- merge failed")
-            continue
+        for test_set in TEST_SETS:
+            test_npz_name = SUBSET_NPZ_MAP.get(test_set)
+            if not test_npz_name:
+                continue
+            test_npz = subset_dir / test_npz_name
+            train_npz = subset_dir / "Train_Subset.npz"
 
-        # Add labels
-        if train_npz.exists() and test_npz.exists():
-            merged = add_labels_and_split(merged, train_npz, test_npz)
-        else:
-            logger.warning("  Subset .npz files not found, skipping label merge")
+            if not test_npz.exists():
+                logger.info(f"  Skipping {test_set}: {test_npz} not found")
+                continue
+            if not train_npz.exists():
+                logger.error(f"  Train_Subset.npz not found: {train_npz}")
+                continue
 
-        # Save
-        output_dir = feature_dir / config_name
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / "features_labeled.csv"
-        merged.to_csv(output_path, index=False)
-        logger.info(f"  Saved: {output_path} ({merged.shape})")
+            logger.info(f"  [{config_name}/{test_set}] Merging...")
+
+            # Merge train features across signals
+            train_features = merge_signals(feature_dir, signals, 'Train_Subset')
+            if train_features is None:
+                logger.error(f"  [{config_name}/{test_set}] Train feature merge failed")
+                continue
+
+            train_labeled = add_labels_keyed(train_features, train_npz)
+            train_labeled['split'] = 'train'
+            logger.info(f"  [{config_name}/{test_set}] Train: {len(train_labeled)} rows")
+
+            # Merge test features across signals
+            test_features = merge_signals(feature_dir, signals, test_set)
+            if test_features is None:
+                logger.error(f"  [{config_name}/{test_set}] Test feature merge failed")
+                continue
+
+            test_labeled = add_labels_keyed(test_features, test_npz)
+            test_labeled['split'] = 'test'
+            logger.info(f"  [{config_name}/{test_set}] Test: {len(test_labeled)} rows")
+
+            # Combine train + test
+            combined = pd.concat([train_labeled, test_labeled], ignore_index=True)
+
+            # Output path: CalFree is default (no suffix), others get suffix
+            output_dir = feature_dir / config_name
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            if test_set == 'CalFree_Test_Subset':
+                output_path = output_dir / "features_labeled.csv"
+            else:
+                output_path = output_dir / f"features_labeled_{test_set}.csv"
+
+            combined.to_csv(output_path, index=False)
+            logger.info(f"  [{config_name}/{test_set}] Saved: {output_path} ({combined.shape})")
 
     logger.info("Merge complete.")
 
