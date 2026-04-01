@@ -54,6 +54,12 @@ def export_subset(subset_path: Path, output_base: Path):
         n_skipped = 0
 
         for subj in unique_subjects:
+            # Skip if already exported (resume after wall-time kill)
+            csv_path = signal_dir / f"{subj}.csv"
+            if csv_path.exists():
+                n_exported += 1
+                continue
+
             mask = subjects == subj
             subj_signals = signals[mask]
 
