@@ -23,6 +23,24 @@ PROJECT_DIR="/projects/SensingandInnovationLab/vignankamarthi/Blood-Pressure-Inf
 cd "$PROJECT_DIR"
 source .venv/bin/activate
 
+# ─── Dependency check: install if missing, die if install fails ───
+check_dep() {
+    python -c "import $1" 2>/dev/null || {
+        echo "Installing missing dependency: $2"
+        pip install "$2" || { echo "FATAL: Failed to install $2"; exit 1; }
+    }
+}
+
+check_dep torch "torch --index-url https://download.pytorch.org/whl/cu121"
+check_dep captum "captum"
+
+# Verify CUDA is available (critical for DL training performance)
+CUDA_OK=$(python -c "import torch; print(torch.cuda.is_available())" 2>/dev/null)
+if [ "$CUDA_OK" != "True" ]; then
+    echo "WARNING: CUDA not available. Training will run on CPU (10x slower)."
+    echo "To fix: pip install torch --index-url https://download.pytorch.org/whl/cu121"
+fi
+
 # DL trains on PPG only -- no config ablation
 TARGET="${TARGET:-sbp}"
 MODEL="${MODEL:-resnet_bigru}"
@@ -32,6 +50,7 @@ echo "=== DL Training ==="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Model: $MODEL | Target: $TARGET | Test Sets: $TEST_SETS"
 echo "GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'N/A')"
+echo "CUDA available: $CUDA_OK"
 echo "Start: $(date)"
 
 SCRATCH="/scratch/kamarthi.v/bp-checkpoints"

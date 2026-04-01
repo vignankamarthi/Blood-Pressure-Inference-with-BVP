@@ -18,6 +18,17 @@ PROJECT_DIR="/projects/SensingandInnovationLab/vignankamarthi/Blood-Pressure-Inf
 cd "$PROJECT_DIR"
 source .venv/bin/activate
 
+# ─── Dependency check ───
+check_dep() {
+    python -c "import $1" 2>/dev/null || {
+        echo "Installing missing dependency: $2"
+        pip install "$2" || { echo "FATAL: Failed to install $2"; exit 1; }
+    }
+}
+
+check_dep torch "torch --index-url https://download.pytorch.org/whl/cu121"
+check_dep captum "captum"
+
 MODEL="${MODEL:-resnet_bigru}"
 TARGET="${TARGET:-sbp}"
 
