@@ -1,9 +1,9 @@
 #!/usr/bin/bash
 #SBATCH --job-name=bp-extract
 #SBATCH --partition=short
-#SBATCH --time=08:00:00
-#SBATCH --cpus-per-task=56
-#SBATCH --mem=128G
+#SBATCH --time=02:00:00
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=32G
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=END,FAIL
