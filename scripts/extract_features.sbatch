@@ -10,8 +10,8 @@
 #SBATCH --mail-user=kamarthi.v@northeastern.edu
 
 # Feature Extraction (Rust) -- extracts 40 features from each signal type.
-# Runs 3 times: PPG, ECG, ABP. Each has separate output dir + checkpoint.
-# Auto-resumes: re-submit safely after wall-time kill.
+# Iterates 3 signals x 5 subsets = 15 Rust runs.
+# Each (signal, subset) pair has its own checkpoint -- safe to resubmit after wall-time kill.
 
 set -uo pipefail
 
@@ -27,54 +27,77 @@ if [ ! -f "$RUST_BIN" ]; then
     exit 1
 fi
 
-echo "=== Feature Extraction (3 signals) ==="
+echo "=== Feature Extraction (3 signals x 5 subsets) ==="
 echo "Job ID: $SLURM_JOB_ID"
 echo "CPUs: $SLURM_CPUS_PER_TASK"
 echo "Start: $(date)"
 
 for SIGNAL in ppg ecg abp; do
-    INPUT_DIR="data/signals/$SIGNAL"
-    OUTPUT_DIR="data/features/$SIGNAL"
+    SIGNAL_DIR="data/signals/$SIGNAL"
 
-    if [ ! -d "$INPUT_DIR" ]; then
-        echo "SKIP $SIGNAL: $INPUT_DIR not found"
+    if [ ! -d "$SIGNAL_DIR" ]; then
+        echo "SKIP $SIGNAL: $SIGNAL_DIR not found"
         continue
     fi
 
-    mkdir -p "$OUTPUT_DIR"
+    for SUBSET_DIR in "$SIGNAL_DIR"/*/; do
+        [ -d "$SUBSET_DIR" ] || continue
 
-    CHECKPOINT="$OUTPUT_DIR/checkpoint.json"
-    RESUME_FLAG=""
-    if [ -f "$CHECKPOINT" ]; then
-        echo "[$SIGNAL] Checkpoint found -- resuming..."
-        RESUME_FLAG="--resume"
-    else
-        echo "[$SIGNAL] Starting fresh..."
-    fi
+        SUBSET_NAME=$(basename "$SUBSET_DIR")
+        OUTPUT_DIR="data/features/$SIGNAL/$SUBSET_NAME"
 
-    echo "[$SIGNAL] Extracting features from $INPUT_DIR -> $OUTPUT_DIR"
-    echo "[$SIGNAL] Start: $(date)"
+        mkdir -p "$OUTPUT_DIR"
 
-    $RUST_BIN extract \
-        --input-dir "$INPUT_DIR" \
-        --output-dir "$OUTPUT_DIR" \
-        --frameworks catch22,entropy,stats \
-        --workers "$SLURM_CPUS_PER_TASK" \
-        --dimensions 7 \
-        --delays 2 \
-        $RESUME_FLAG \
-        -v 1
+        # Check if already complete (features.csv exists with data rows)
+        if [ -f "$OUTPUT_DIR/features.csv" ]; then
+            ROWS=$(wc -l < "$OUTPUT_DIR/features.csv")
+            if [ "$ROWS" -gt 1 ]; then
+                echo "[$SIGNAL/$SUBSET_NAME] Already complete ($ROWS rows) -- skipping"
+                continue
+            fi
+        fi
 
-    echo "[$SIGNAL] Done: $(date)"
-    echo ""
+        CHECKPOINT="$OUTPUT_DIR/checkpoint.json"
+        RESUME_FLAG=""
+        if [ -f "$CHECKPOINT" ]; then
+            echo "[$SIGNAL/$SUBSET_NAME] Checkpoint found -- resuming..."
+            RESUME_FLAG="--resume"
+        else
+            echo "[$SIGNAL/$SUBSET_NAME] Starting fresh..."
+        fi
+
+        echo "[$SIGNAL/$SUBSET_NAME] Extracting features: $SUBSET_DIR -> $OUTPUT_DIR"
+        echo "[$SIGNAL/$SUBSET_NAME] Start: $(date)"
+
+        $RUST_BIN extract \
+            --input-dir "$SUBSET_DIR" \
+            --output-dir "$OUTPUT_DIR" \
+            --frameworks catch22,entropy,stats \
+            --workers "$SLURM_CPUS_PER_TASK" \
+            --dimensions 7 \
+            --delays 2 \
+            $RESUME_FLAG \
+            -v 1
+
+        echo "[$SIGNAL/$SUBSET_NAME] Done: $(date)"
+        echo ""
+    done
 done
 
 echo "=== Feature Extraction Complete ==="
 echo "End: $(date)"
+echo ""
 echo "Outputs:"
 for SIGNAL in ppg ecg abp; do
-    if [ -f "data/features/$SIGNAL/features.csv" ]; then
-        ROWS=$(wc -l < "data/features/$SIGNAL/features.csv")
-        echo "  $SIGNAL: $ROWS rows"
-    fi
+    for SUBSET_DIR in data/signals/$SIGNAL/*/; do
+        [ -d "$SUBSET_DIR" ] || continue
+        SUBSET_NAME=$(basename "$SUBSET_DIR")
+        FEATURE_FILE="data/features/$SIGNAL/$SUBSET_NAME/features.csv"
+        if [ -f "$FEATURE_FILE" ]; then
+            ROWS=$(wc -l < "$FEATURE_FILE")
+            echo "  $SIGNAL/$SUBSET_NAME: $ROWS rows"
+        else
+            echo "  $SIGNAL/$SUBSET_NAME: MISSING"
+        fi
+    done
 done
