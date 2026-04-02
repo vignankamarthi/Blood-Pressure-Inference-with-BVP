@@ -37,7 +37,7 @@ logger = None
 def load_trained_model(model_name: str, checkpoint_dir: Path, config: str, target: str):
     """Load best.pt checkpoint for a trained model."""
     model = create_dl_model(model_name, in_channels=1)
-    best_path = checkpoint_dir / f"{model_name}_{config}_{target}" / "best.pt"
+    best_path = checkpoint_dir / f"dl_{model_name}_{config}_{target}" / "best.pt"
     if not best_path.exists():
         raise FileNotFoundError(f"No checkpoint at {best_path}")
 
