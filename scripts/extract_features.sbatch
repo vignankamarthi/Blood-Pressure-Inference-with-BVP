@@ -48,20 +48,12 @@ for SIGNAL in ppg ecg abp; do
 
         mkdir -p "$OUTPUT_DIR"
 
-        # Check if already complete (features.csv exists with data rows)
-        if [ -f "$OUTPUT_DIR/features.csv" ]; then
-            ROWS=$(wc -l < "$OUTPUT_DIR/features.csv")
-            if [ "$ROWS" -gt 1 ]; then
-                echo "[$SIGNAL/$SUBSET_NAME] Already complete ($ROWS rows) -- skipping"
-                continue
-            fi
-        fi
-
+        # Let Rust's own per-file checkpoint handle resume logic.
+        # Always pass --resume; Rust skips already-processed CSV files via checkpoint.json.
+        RESUME_FLAG="--resume"
         CHECKPOINT="$OUTPUT_DIR/checkpoint.json"
-        RESUME_FLAG=""
         if [ -f "$CHECKPOINT" ]; then
             echo "[$SIGNAL/$SUBSET_NAME] Checkpoint found -- resuming..."
-            RESUME_FLAG="--resume"
         else
             echo "[$SIGNAL/$SUBSET_NAME] Starting fresh..."
         fi
