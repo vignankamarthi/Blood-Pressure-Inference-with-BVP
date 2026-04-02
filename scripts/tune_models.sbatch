@@ -2,7 +2,7 @@
 #SBATCH --job-name=bp-tune
 #SBATCH --partition=short
 #SBATCH --time=04:00:00
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=56
 #SBATCH --mem=16G
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.err
@@ -36,7 +36,7 @@ python scripts/train_models.py \
     --results-dir results \
     --tune \
     --resume \
-    --n-trials 100
+    --n-trials 50
 
 echo "=== Tuning Complete ==="
 echo "End: $(date)"
