@@ -36,7 +36,7 @@ python scripts/train_models.py \
     --results-dir results \
     --tune \
     --resume \
-    --n-trials 50
+    --n-trials 30
 
 echo "=== Tuning Complete ==="
 echo "End: $(date)"
