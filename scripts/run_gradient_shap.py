@@ -44,7 +44,13 @@ def load_trained_model(model_name: str, checkpoint_dir: Path, config: str, targe
     ckpt = torch.load(best_path, map_location=DEVICE, weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])
     model = model.to(DEVICE)
-    model.eval()
+    # Keep model in train mode for GradientSHAP -- cuDNN RNN backward requires it.
+    # Disable dropout manually instead of using eval().
+    for module in model.modules():
+        if isinstance(module, (torch.nn.Dropout, torch.nn.Dropout1d, torch.nn.Dropout2d)):
+            module.eval()
+        if isinstance(module, torch.nn.BatchNorm1d):
+            module.eval()
     logger.info(f"Loaded model from {best_path}")
     return model
 
