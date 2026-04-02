@@ -31,7 +31,7 @@ check_dep() {
     }
 }
 
-check_dep torch "torch --index-url https://download.pytorch.org/whl/cu121"
+check_dep torch "torch"
 check_dep captum "captum"
 
 # Verify CUDA is available (critical for DL training performance)
