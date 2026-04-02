@@ -1,10 +1,10 @@
 #!/usr/bin/bash
 #SBATCH --job-name=bp-shap
 #SBATCH --partition=gpu
-#SBATCH --time=02:00:00
+#SBATCH --time=01:00:00
 #SBATCH --gres=gpu:h200:1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
+#SBATCH --mem=16G
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=END,FAIL
