@@ -9,12 +9,13 @@ from torch.utils.data import Dataset
 from typing import Dict, Optional
 
 
-# Ablation config -> which signal keys to include
+# Ablation config -> which signal keys to include.
+# ABP configs (ppg_abp, ppg_ecg_abp) dropped 2026-04-05 due to feature-source leakage:
+# SBP/DBP labels are peaks/troughs of the ABP waveform, so using ABP as a predictive
+# input leaks the target. See CLEANUP_PLAN.md at repo root for full audit.
 SIGNAL_CONFIGS = {
     "ppg": ["ppg"],
     "ppg_ecg": ["ppg", "ecg"],
-    "ppg_abp": ["ppg", "abp"],
-    "ppg_ecg_abp": ["ppg", "ecg", "abp"],
 }
 
 
@@ -38,7 +39,7 @@ class BPSignalDataset(Dataset):
         """
         Args:
             subset_path: Path to .npz subset file
-            config: Ablation config ('ppg', 'ppg_ecg', 'ppg_abp', 'ppg_ecg_abp')
+            config: Ablation config ('ppg' or 'ppg_ecg')
             target: 'sbp' or 'dbp'
             normalize: Whether to normalize signals per-channel
             scaler_stats: Dict with 'mean' and 'std' per channel (fit on training)

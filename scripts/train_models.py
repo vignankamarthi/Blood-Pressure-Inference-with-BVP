@@ -26,8 +26,8 @@ from src.evaluation import evaluate_model, generate_leaderboard
 def parse_args():
     parser = argparse.ArgumentParser(description="Train BP estimation models")
     parser.add_argument("--config", type=str, default="ppg",
-                        choices=["ppg", "ppg_ecg", "ppg_abp", "ppg_ecg_abp"],
-                        help="Ablation config (signal combination)")
+                        choices=["ppg", "ppg_ecg"],
+                        help="Ablation config (signal combination). ABP configs dropped 2026-04-05 (feature-source leakage audit).")
     parser.add_argument("--features", type=str, default=None,
                         help="Path to feature CSV (auto-derived from --config if not set)")
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints",

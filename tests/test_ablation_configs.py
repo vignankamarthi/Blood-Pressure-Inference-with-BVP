@@ -13,18 +13,19 @@ def test_ablation_configs_exist():
     assert config_path.exists(), "ablation_configs.json not found"
 
 
-def test_ablation_configs_has_4_configs():
+def test_ablation_configs_has_2_configs():
+    # ABP configs dropped 2026-04-05 (feature-source leakage audit).
     config_path = Path(__file__).parent.parent / "configs" / "ablation_configs.json"
     with open(config_path) as f:
         configs = json.load(f)
-    assert len(configs) == 4, f"Expected 4 configs, got {len(configs)}"
+    assert len(configs) == 2, f"Expected 2 configs, got {len(configs)}"
 
 
 def test_ablation_config_names():
     config_path = Path(__file__).parent.parent / "configs" / "ablation_configs.json"
     with open(config_path) as f:
         configs = json.load(f)
-    expected = {"ppg", "ppg_ecg", "ppg_abp", "ppg_ecg_abp"}
+    expected = {"ppg", "ppg_ecg"}
     assert set(configs.keys()) == expected
 
 
@@ -83,7 +84,7 @@ def test_train_models_has_config_flag():
     script = Path(__file__).parent.parent / "scripts" / "train_models.py"
     content = script.read_text()
     assert "--config" in content, "train_models.py missing --config argument"
-    assert "ppg_ecg_abp" in content, "train_models.py missing ppg_ecg_abp config option"
+    assert "ppg_ecg" in content, "train_models.py missing ppg_ecg config option"
 
 
 def test_slurm_scripts_accept_config():

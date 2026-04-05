@@ -5,7 +5,7 @@ Merge Rust-extracted feature CSVs with .npz subset labels into training-ready CS
 Key-based merge using (file_name, segment_id) -> (subject, within-subject seg_idx).
 Produces one features_labeled.csv per (ablation_config, test_set) combination.
 
-For each ablation config (ppg, ppg_ecg, ppg_abp, ppg_ecg_abp):
+For each ablation config (ppg, ppg_ecg):
   - Load per-subset feature CSVs from data/features/{signal}/{subset}/features.csv
   - Prefix feature columns by signal name
   - Horizontal merge across signals on (file_name, segment_id)

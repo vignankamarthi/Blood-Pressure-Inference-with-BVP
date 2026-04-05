@@ -13,7 +13,7 @@ echo "Best ML: $BEST_ML"
 echo "Best DL: $BEST_DL"
 echo ""
 
-for CONFIG in ppg ppg_ecg ppg_abp ppg_ecg_abp; do
+for CONFIG in ppg ppg_ecg; do
     echo "Config: $CONFIG"
 
     # ML champion
@@ -29,5 +29,5 @@ for CONFIG in ppg ppg_ecg ppg_abp ppg_ecg_abp; do
     echo ""
 done
 
-echo "Phase 2: 16 jobs submitted (4 configs x (1 ML tune + 1 ML train + 2 DL train))"
+echo "Phase 2: 8 jobs submitted (2 configs x (1 ML tune + 1 ML train + 2 DL train))"
 echo "Monitor: squeue -u kamarthi.v"
