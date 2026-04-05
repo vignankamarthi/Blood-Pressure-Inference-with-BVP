@@ -7,7 +7,8 @@
 ## Experiment Overview
 
 Two-track experiment: classical ML with signal ablation + deep learning on raw PPG.
-72 total model evaluations + GradientSHAP interpretability analysis.
+42 total model evaluations + GradientSHAP interpretability analysis
+(2-config ablation after 2026-04-05 ABP feature-source leakage audit).
 
 ```
 PulseDB v2.0 (5.2M segments, 5,361 subjects, 125 Hz)
@@ -22,7 +23,7 @@ PulseDB v2.0 (5.2M segments, 5,361 subjects, 125 Hz)
     |                                          |
     v                                          v
 TRACK 1: Feature Engineering + ML          TRACK 2: Deep Learning
-(CPU, 56 cores)                            (GPU, H200/A100)
+(CPU, 56 cores)                            (GPU, H200)
     |                                          |
     v                                          v
 Rust Feature Extraction              Raw PPG waveform only
@@ -36,7 +37,7 @@ StandardScaler                         ResNet-BiGRU (primary)
 (per column, train only)               ResNet-1D (baseline)
     |                                    |
     v                                    v
-5 Models (x4 signal configs):       PPG only (no ablation):
+5 Models (x2 signal configs):       PPG only (no ablation):
   Ridge                              Both SBP and DBP targets
   Decision Tree                          |
   Random Forest                          v
@@ -132,11 +133,10 @@ StandardScaler                         ResNet-BiGRU (primary)
 |  XGBoost      -- gradient boosting (Newton step)              |
 |  LightGBM     -- histogram boosting (5.2M row efficiency)     |
 |                                                               |
-|  Signal Ablation (4 configs):                                |
-|    PPG only (40 features)                                    |
-|    PPG + ECG (80 features)                                   |
-|    PPG + ABP (80 features)                                   |
-|    PPG + ECG + ABP (120 features)                            |
+|  Signal Ablation (2 configs):                                |
+|    PPG only (40 features) -- primary cuffless case           |
+|    PPG + ECG (80 features) -- dual-signal wearable           |
+|  (ABP configs dropped 2026-04-05: feature-source leakage)    |
 |                                                               |
 |  All with exhaustive checkpointing:                           |
 |    RF: every 50 trees | XGB: every 25 rounds                 |
@@ -207,10 +207,11 @@ StandardScaler                         ResNet-BiGRU (primary)
 |                   EXPERIMENT DESIGN                           |
 |                                                               |
 |  CLASSICAL ML (Track 1):                                     |
-|    5 models x 4 signal configs x 2 targets x 3 test sets    |
-|    = 60 evaluations                                          |
-|    Ablation answers: does adding ECG/ABP to Catch22          |
-|    features improve over PPG alone?                          |
+|    5 models x 2 signal configs x 2 targets x 3 test sets    |
+|    = 30 evaluations                                          |
+|    Ablation answers: does adding ECG to Catch22 PPG features |
+|    improve predictive accuracy over PPG alone in a           |
+|    wearable-plausible setup?                                 |
 |                                                               |
 |  DEEP LEARNING (Track 2):                                    |
 |    2 architectures x 1 signal (PPG) x 2 targets x 3 tests   |
@@ -223,7 +224,7 @@ StandardScaler                         ResNet-BiGRU (primary)
 |    Both on PPG-only for fair comparison                      |
 |    Interpretability: impurity/gain vs GradientSHAP maps      |
 |                                                               |
-|  TOTAL: 72 evaluations + GradientSHAP analysis              |
+|  TOTAL: 42 evaluations + GradientSHAP analysis              |
 +---------------------------------------------------------------+
 ```
 

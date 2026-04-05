@@ -2,7 +2,7 @@
 
 **Cuffless blood pressure estimation from physiological signals using Catch22 + entropy feature extraction, ensemble learning, and deep learning.**
 
-Two-track experiment: handcrafted features + traditional ML vs. learned features + deep learning. 4-configuration ablation study across PPG, ECG, and ABP signals proves PPG-only sufficiency for wearable deployment.
+Two-track experiment: handcrafted features + traditional ML vs. learned features + deep learning. 2-configuration ablation (PPG vs PPG+ECG) tests whether adding ECG to PPG improves cuffless BP estimation in a wearable-plausible setup. ABP configs dropped 2026-04-05 after feature-source leakage audit (see CLEANUP_PLAN.md).
 
 **Dataset**: [PulseDB v2.0](https://github.com/pulselabteam/PulseDB) -- 5.2M segments, 5,361 subjects, MIMIC-III (USA) + VitalDB (South Korea)
 
@@ -15,7 +15,9 @@ PulseDB v2.0 (5.2M segments, 5,361 subjects, 125 Hz)
     |
     +-- PPG_Record (raw photoplethysmography -- wearable-viable)
     +-- ECG_F (electrocardiogram -- clinical)
-    +-- ABP_Raw (arterial blood pressure -- invasive, gold standard)
+    +-- ABP_Raw (arterial blood pressure -- LABEL SOURCE ONLY;
+         SBP/DBP are peaks/troughs of this waveform, so ABP
+         is never used as a predictive feature)
     |
     +==========================================+
     |        TWO PARALLEL TRACKS               |
@@ -37,7 +39,7 @@ StandardScaler                         ResNet-1D (baseline)
 (per column, train only)                 |
     |                                    v
     v                                GradientSHAP
-5 Models x 4 signal configs:        temporal importance maps
+5 Models x 2 signal configs:        temporal importance maps
   Ridge                                  |
   Decision Tree                          |
   Random Forest                          |
@@ -49,9 +51,9 @@ StandardScaler                         ResNet-1D (baseline)
                      v
               EVALUATION
                      |
-    Classical ML: 5 models x 4 signal ablations x 2 targets
-      = 60 evaluations (CalFree + CalBased + AAMI)
-      Ablation: PPG | PPG+ECG | PPG+ABP | PPG+ECG+ABP
+    Classical ML: 5 models x 2 signal ablations x 2 targets
+      = 30 evaluations (CalFree + CalBased + AAMI)
+      Ablation: PPG | PPG+ECG
                      |
     Deep Learning: 2 architectures x PPG only x 2 targets
       = 12 evaluations (CalFree + CalBased + AAMI)
@@ -60,7 +62,7 @@ StandardScaler                         ResNet-1D (baseline)
     Cross-track: best classical vs best DL on PPG-only
                      |
                      v
-         72 total evaluations + GradientSHAP
+         42 total evaluations + GradientSHAP
       MAE, RMSE, R-squared
       AAMI compliance (ME < 5, SD < 8 mmHg)
       BHS grading (A/B/C/D)
@@ -69,7 +71,7 @@ StandardScaler                         ResNet-1D (baseline)
       Cross-config comparison (ablation)
 ```
 
-**Total: 34 model trainings. Question answered: is PPG alone sufficient for clinically meaningful BP estimation?**
+**Total: 20 model trainings (10 classical x 2 configs + 4 DL on PPG only). Question answered: is PPG alone sufficient for clinically meaningful BP estimation, and does ECG help?**
 
 ---
 
