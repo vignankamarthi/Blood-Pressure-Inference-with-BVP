@@ -2,7 +2,7 @@
 #SBATCH --job-name=bp-train
 #SBATCH --partition=short
 #SBATCH --time=02:00:00
-#SBATCH --cpus-per-task=16
+#SBATCH --cpus-per-task=56
 #SBATCH --mem=16G
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.err
