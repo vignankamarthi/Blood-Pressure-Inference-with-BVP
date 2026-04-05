@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 #SBATCH --job-name=bp-tune
 #SBATCH --partition=short
-#SBATCH --time=08:00:00
+#SBATCH --time=04:00:00
 #SBATCH --cpus-per-task=56
 #SBATCH --mem=16G
 #SBATCH --output=logs/%x_%j.log
