@@ -2,7 +2,7 @@
 
 **Cuffless blood pressure estimation from physiological signals using Catch22 + entropy feature extraction, ensemble learning, and deep learning.**
 
-Two-track experiment: handcrafted features + traditional ML vs. learned features + deep learning. 2-configuration ablation (PPG vs PPG+ECG) tests whether adding ECG to PPG improves cuffless BP estimation in a wearable-plausible setup. ABP configs dropped 2026-04-05 after feature-source leakage audit (see CLEANUP_PLAN.md).
+Two-track experiment: handcrafted features + traditional ML vs. learned features + deep learning. 2-configuration ablation (PPG vs PPG+ECG) tests whether adding ECG to PPG improves cuffless BP estimation in a wearable-plausible setup.
 
 **Dataset**: [PulseDB v2.0](https://github.com/pulselabteam/PulseDB) -- 5.2M segments, 5,361 subjects, MIMIC-III (USA) + VitalDB (South Korea)
 
@@ -71,7 +71,39 @@ StandardScaler                         ResNet-1D (baseline)
       Cross-config comparison (ablation)
 ```
 
-**Total: 20 model trainings (10 classical x 2 configs + 4 DL on PPG only). Question answered: is PPG alone sufficient for clinically meaningful BP estimation, and does ECG help?**
+**Total: 24 model trainings (10 classical x 2 configs + 4 DL on PPG only), 42 evaluations + GradientSHAP analysis.**
+
+---
+
+## Key Results (CalFree Test Set, 111,600 samples)
+
+CalFree is the hardest evaluation: test subjects have zero calibration data in training.
+
+**Classical ML (Track 1) -- Best: LightGBM**
+
+| Model | SBP MAE | SBP R2 | DBP MAE | DBP R2 | AAMI | BHS |
+|-------|---------|--------|---------|--------|------|-----|
+| LightGBM (PPG) | 14.46 | 0.211 | 8.54 | 0.201 | FAIL | D |
+| LightGBM (PPG+ECG) | 14.43 | 0.219 | 8.66 | 0.194 | FAIL | D |
+| Random Forest (PPG) | 14.69 | 0.193 | 8.66 | 0.177 | FAIL | D |
+| XGBoost (PPG) | 15.52 | 0.113 | 8.91 | 0.147 | FAIL | D |
+| Ridge (PPG) | 15.50 | 0.113 | 9.14 | 0.115 | FAIL | D |
+| Decision Tree (PPG) | 15.28 | 0.124 | 8.96 | 0.131 | FAIL | D |
+
+**Deep Learning (Track 2) -- Best: ResNet-BiGRU**
+
+| Model | SBP MAE | SBP R2 | DBP MAE | DBP R2 | AAMI | BHS (DBP) |
+|-------|---------|--------|---------|--------|------|-----------|
+| ResNet-BiGRU | 13.61 | 0.266 | 7.97 | 0.284 | FAIL | **C** |
+| ResNet-1D | 13.84 | 0.253 | 7.90 | 0.315 | FAIL | D |
+
+**Key Findings:**
+- No model achieves AAMI clinical compliance (all SD > 8 mmHg)
+- ResNet-BiGRU DBP achieves BHS Grade C (40.8% within 5 mmHg, 69.7% within 10 mmHg)
+- DL outperforms classical ML on both SBP and DBP without any feature engineering
+- Adding ECG to PPG provides negligible improvement (+0.03 mmHg SBP MAE), suggesting PPG alone captures the relevant hemodynamic information
+- GradientSHAP reveals the model concentrates on timesteps 7.4-9.0s (last 2-3 seconds of the waveform) for SBP, and splits attention between early (0.5-0.7s) and late (8.7-9.5s) regions for DBP
+- Results consistent with Moulaeifard 2025 PulseDB benchmark (SBP MAE 13.9)
 
 ---
 
@@ -79,7 +111,7 @@ StandardScaler                         ResNet-1D (baseline)
 
 ```
 Blood-Pressure-Inference-with-BVP/
-├── Feature-Extraction-Rust-Complete/  # Git submodule -- Rust feature library
+├── Feature-Extraction-Rust-Complete/  # Rust feature extraction library (embedded)
 ├── src/
 │   ├── data_loader.py                # PulseDB loading, StandardScaler
 │   ├── models.py                     # 5 ML models with per-model checkpointing
@@ -93,14 +125,16 @@ Blood-Pressure-Inference-with-BVP/
 │   ├── train_models.py               # ML training: --resume, --config, --tune
 │   ├── train_dl_models.py            # DL training: --config, --model, --target
 │   ├── evaluate.py                   # Standalone evaluation
-│   ├── generate_subsets.py           # Python replacement for MATLAB script
-│   ├── inspect_mat_helper.py         # GATE G5: verify .mat structure
-│   ├── inspect_info_helper.py        # Inspect Info .mat field format
+│   ├── run_gradient_shap.py          # GradientSHAP temporal attribution analysis
+│   ├── generate_subsets.py           # PulseDB subject-level subset generation
+│   ├── merge_features_labels.py      # Key-based feature + label merge
+│   ├── inspect_*.py / probe_*.py     # Data verification scripts
 │   ├── *.sbatch                      # SLURM scripts for all cluster operations
 │   └── setup_cluster.sh              # NEU Explorer one-time setup
-├── configs/                          # Model + feature configuration
+├── configs/                          # Model + feature + ablation configuration
 ├── tests/                            # 58 pytest tests + 24 Rust tests
-├── reports/                          # Proposal, milestone, final report
+├── results/                          # Evaluation metrics, leaderboards, SHAP analysis
+├── reports/                          # Proposal, milestone, final report (LaTeX)
 └── data/                             # PulseDB (gitignored, cluster-only, 963 GB)
 ```
 
@@ -124,8 +158,7 @@ Every operation is resumable. SLURM wall-time kills lose zero work.
 ## Quick Start
 
 ```bash
-# Clone with submodule
-git clone --recurse-submodules https://github.com/vignankamarthi/Blood-Pressure-Inference-with-BVP.git
+git clone https://github.com/vignankamarthi/Blood-Pressure-Inference-with-BVP.git
 cd Blood-Pressure-Inference-with-BVP
 
 # Install dependencies

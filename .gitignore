@@ -43,8 +43,7 @@ data/signals/
 *.blg
 *.toc
 
-# Results and outputs (created at runtime)
-results/
+# Checkpoints (large model binaries, cluster-only)
 checkpoints/
 
 # Tracking document (untracked -- human-machine contract)

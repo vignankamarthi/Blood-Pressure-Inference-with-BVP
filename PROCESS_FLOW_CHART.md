@@ -257,3 +257,98 @@ StandardScaler                         ResNet-BiGRU (primary)
 |    AAMI (clinical standard test set)                         |
 +---------------------------------------------------------------+
 ```
+
+---
+
+## Results Summary
+
+All results on CalFree test set (111,600 samples, no calibration data in training).
+
+### Track 1: Classical ML (Best = LightGBM)
+
+```
++---------------------------------------------------------------+
+|                CLASSICAL ML RESULTS (CalFree)                 |
+|                                                               |
+|  PPG-only (40 Catch22+entropy+stats features):               |
+|                                                               |
+|  Model       | SBP MAE | SBP R2 | DBP MAE | DBP R2 | AAMI  |
+|  ------------|---------|--------|---------|--------|-------|
+|  LightGBM    | 14.46   | 0.211  | 8.54    | 0.201  | FAIL  |
+|  RF           | 14.69   | 0.193  | 8.66    | 0.177  | FAIL  |
+|  DT           | 15.28   | 0.124  | 8.96    | 0.131  | FAIL  |
+|  XGBoost     | 15.52   | 0.113  | 8.91    | 0.147  | FAIL  |
+|  Ridge       | 15.50   | 0.113  | 9.14    | 0.115  | FAIL  |
+|                                                               |
+|  PPG+ECG (80 features):                                      |
+|  LightGBM    | 14.43   | 0.219  | 8.66    | 0.194  | FAIL  |
+|  RF           | 14.70   | 0.200  | 8.77    | 0.174  | FAIL  |
+|                                                               |
+|  ECG adds ~0.03 mmHg SBP improvement -- negligible.          |
+|  PPG alone captures the relevant hemodynamic information.     |
++---------------------------------------------------------------+
+```
+
+### Track 2: Deep Learning (Best = ResNet-BiGRU)
+
+```
++---------------------------------------------------------------+
+|                DEEP LEARNING RESULTS (CalFree)                |
+|                                                               |
+|  Raw PPG only (1250 samples, 1 channel, no features):        |
+|                                                               |
+|  Model          | SBP MAE | SBP R2 | DBP MAE | DBP R2      |
+|  ---------------|---------|--------|---------|--------      |
+|  ResNet-BiGRU   | 13.61   | 0.266  | 7.97    | 0.284       |
+|  ResNet-1D      | 13.84   | 0.253  | 7.90    | 0.315       |
+|                                                               |
+|  AAMI: ALL FAIL (SD > 8 mmHg for all models)                |
+|  BHS:  ResNet-BiGRU DBP achieves Grade C                     |
+|        (40.8% within 5, 69.7% within 10, 86.2% within 15)   |
+|                                                               |
+|  DL outperforms classical ML by ~0.8 mmHg SBP MAE           |
+|  without any feature engineering.                            |
++---------------------------------------------------------------+
+```
+
+### GradientSHAP Interpretability
+
+```
++---------------------------------------------------------------+
+|              GRADIENTSHAP TEMPORAL MAPS                       |
+|                                                               |
+|  Model: ResNet-BiGRU on CalFree (200 samples)                |
+|                                                               |
+|  SBP: Top timesteps cluster at 7.4-9.0s                     |
+|    (last 2-3 seconds of the 10-second PPG waveform)          |
+|    Global mean |attribution|: 2.46                           |
+|                                                               |
+|  DBP: Attention splits between early and late regions        |
+|    Early: 0.5-0.7s | Late: 8.7-9.5s                         |
+|    Global mean |attribution|: 1.19                           |
+|                                                               |
+|  Interpretation: the model learns to focus on the            |
+|  morphological features of the reflected wave (dicrotic      |
+|  notch region), consistent with the physiological link       |
+|  between arterial stiffness and blood pressure.              |
++---------------------------------------------------------------+
+```
+
+### Cross-Track Comparison
+
+```
++---------------------------------------------------------------+
+|               CROSS-TRACK (PPG-only, CalFree)                 |
+|                                                               |
+|  Track         | Best Model    | SBP MAE | DBP MAE          |
+|  --------------|---------------|---------|--------          |
+|  Classical ML  | LightGBM      | 14.46   | 8.54             |
+|  Deep Learning | ResNet-BiGRU  | 13.61   | 7.97             |
+|  Improvement   |               | -0.85   | -0.57            |
+|                                                               |
+|  DL wins on both targets without feature engineering.        |
+|  Classical ML R2 peaks at 0.21; DL reaches 0.27-0.32.       |
+|  Neither track achieves AAMI clinical compliance.            |
+|  Consistent with PulseDB benchmark (Moulaeifard 2025).      |
++---------------------------------------------------------------+
+```
