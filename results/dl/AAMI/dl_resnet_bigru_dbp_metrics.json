@@ -1,0 +1,35 @@
+{
+  "model": "dl_resnet_bigru",
+  "target": "dbp",
+  "metrics": {
+    "ME": 9.79302978515625,
+    "SD": 16.170137405395508,
+    "MAE": 14.394857406616211,
+    "RMSE": 18.89925054446811,
+    "R2": -0.07726597785949707,
+    "MedianAE": 11.91030502319336,
+    "MaxError": 84.81797790527344,
+    "n_samples": 1340
+  },
+  "aami": {
+    "grade": "FAIL",
+    "ME_pass": false,
+    "SD_pass": false,
+    "ME_value": 9.79302978515625,
+    "SD_value": 16.170137405395508,
+    "ME_threshold": 5.0,
+    "SD_threshold": 8.0
+  },
+  "bhs": {
+    "grade": "D",
+    "pct_within_5": 25.298507462686565,
+    "pct_within_10": 43.28358208955223,
+    "pct_within_15": 61.56716417910447
+  },
+  "bland_altman": {
+    "bias": 9.79302978515625,
+    "sd": 16.170137405395508,
+    "lower_limit": -21.900439529418946,
+    "upper_limit": 41.48649909973145
+  }
+}
