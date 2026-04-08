@@ -1,0 +1,79 @@
+% Speaker Notes -- DS4400 Final Project
+% Blood Pressure Inference from Physiological Signals
+% Portrait, black and white, pure bullets for printing.
+
+\documentclass[11pt]{article}
+\usepackage[margin=0.85in]{geometry}
+\usepackage{enumitem}
+\renewcommand{\familydefault}{\sfdefault}
+\pagestyle{empty}
+
+\setlist[itemize]{leftmargin=18pt, itemsep=3pt, topsep=2pt, parsep=0pt}
+\setlength{\parskip}{9pt}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+{\Large\bfseries DS4400 Final Project -- Speaker Notes}\\[2pt]
+{\normalsize Vignan Kamarthi \& Ariv Ahuja \textbar{} April 10, 2026}
+\vspace{4pt}
+\hrule
+\vspace{6pt}
+
+\textbf{Slide 1: Title (30 seconds)}
+\begin{itemize}
+  \item [ARIV] Introduce both of us
+  \item [ARIV] Project: cuffless blood pressure estimation from wearable signals
+  \item [ARIV] Can a smartwatch predict your blood pressure without a cuff?
+  \item [ARIV] Code on GitHub, link at bottom of slide
+\end{itemize}
+
+\textbf{Slide 2: The Clinical Challenge (60 seconds)}
+\begin{itemize}
+  \item [ARIV] Hypertension: 140/90 mmHg, leading modifiable risk factor for cardiovascular death
+  \item [ARIV] Cuff measurement is infrequent, reactive, clinical-visit-only
+  \item [ARIV] PPG: optical pulse signal already in smartwatches and pulse oximeters
+  \item [ARIV] Goal: infer BP from PPG, enable continuous passive monitoring
+  \item [ARIV] Dataset: PulseDB v2.0, 5.2M segments, 5,361 subjects, MIMIC + VitalDB
+  \item [ARIV] 125 Hz, 10-second windows, 3 signals (PPG, ECG, ABP)
+  \item [ARIV] CalFree protocol: train/test split by subject, no data leakage
+  \item [ARIV] Two-track experiment: handcrafted features vs. learned representations
+\end{itemize}
+
+\textbf{Slide 3: Two-Track Pipeline (90 seconds)}
+\begin{itemize}
+  \item [VIGNAN] Two parallel pipelines on the same data
+  \item [VIGNAN] Classical track: raw signals into Rust feature extraction engine
+  \item [VIGNAN] 40 features per signal: 22 Catch22, 10 entropy, 8 stats
+  \item [VIGNAN] Rust processes 5.2M segments in seconds, not hours
+  \item [VIGNAN] Five models: Ridge, DT, RF, XGBoost, LightGBM
+  \item [VIGNAN] Each tuned with Optuna, 30 Bayesian optimization trials
+  \item [VIGNAN] DL track: raw PPG only, 1,250 samples
+  \item [VIGNAN] ResNet-BiGRU: conv blocks for local features, BiGRU for temporal dependencies
+  \item [VIGNAN] ResNet-1D: CNN-only baseline, no temporal component
+  \item [VIGNAN] GradientSHAP: which PPG timesteps drive BP predictions
+\end{itemize}
+
+\textbf{Slide 4: Key Results (90 seconds)}
+\begin{itemize}
+  \item [VIGNAN] Results on CalFree test set, 111,600 segments, much more challenging than CalBased
+  \item [VIGNAN] Best classical: LightGBM, SBP MAE 14.46, DBP MAE 8.54
+  \item [VIGNAN] Best DL: ResNet-BiGRU, SBP MAE 13.61, DBP MAE 7.97
+  \item [VIGNAN] DL beats classical by 0.85 mmHg SBP, 0.57 mmHg DBP
+  \item [VIGNAN] DBP achieves BHS Grade C (clinically measurable, not yet Grade A)
+  \item [VIGNAN] Adding ECG to PPG improves MAE by only 0.03 mmHg, negligible
+  \item [VIGNAN] All models fail AAMI: SD exceeds 8 mmHg across the board
+  \item [VIGNAN] Consistent with PulseDB benchmark, similar performance across architectures
+  \item [VIGNAN] GradientSHAP: model focuses on last 2--3 seconds (dicrotic notch region)
+\end{itemize}
+
+\textbf{Slide 5: What We Learned (30 seconds)}
+\begin{itemize}
+  \item [ARIV] Three takeaways
+  \item [ARIV] PPG alone is sufficient, ECG adds nothing, good news for wearables
+  \item [ARIV] DL outperforms handcrafted features by 0.85 mmHg SBP without any engineering
+  \item [ARIV] AAMI compliance is an open challenge for the entire field, not just our models
+  \item [ARIV] Thank you, happy to take questions
+\end{itemize}
+
+\end{document}

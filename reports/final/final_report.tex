@@ -1,0 +1,328 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{natbib}
+\usepackage{amsmath}
+\usepackage{multirow}
+
+\titlespacing*{\section}{0pt}{1.2ex plus 0.5ex minus 0.2ex}{0.8ex plus 0.2ex}
+\titlespacing*{\subsection}{0pt}{0.8ex plus 0.3ex minus 0.1ex}{0.5ex plus 0.1ex}
+
+\setlength{\parskip}{0.4em}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+\begin{center}
+{\Large \textbf{DS 4400: Machine Learning and Data Mining I}} \\[0.3em]
+{\large Spring 2026} \\[0.3em]
+{\large Final Project Report} \\[1em]
+{\large Project Title: Cuffless Blood Pressure Estimation from Physiological Signals \\
+Using Time-Series Feature Engineering and Deep Learning} \\[0.8em]
+TA: Sharon \\
+Team Members: Vignan Kamarthi, Ariv Ahuja \\[0.5em]
+Link to code: \url{https://github.com/vignankamarthi/Blood-Pressure-Inference-with-BVP} \\
+Link to video recording: [PLACEHOLDER]
+\end{center}
+
+%% ============================================================
+\section{Problem Description}
+%% ============================================================
+
+Cardiovascular diseases are the leading cause of mortality worldwide, responsible for approximately 17.9 million deaths per year. Blood pressure (BP) is among the most critical cardiovascular risk indicators, yet conventional measurement requires an inflatable cuff that is intrusive, uncomfortable, and captures only isolated snapshots rather than continuous readings. This limitation makes standard sphygmomanometry unsuitable for real-time monitoring during daily life, sleep, or exercise.
+
+Cuffless BP monitoring from wearable sensors would enable early hypertension detection and continuous cardiovascular tracking without clinical intervention \citep{zhao2023cuffless}. Photoplethysmography (PPG), the optical pulse-sensing technology embedded in consumer smartwatches and fitness trackers, measures blood volume changes in the microvasculature by detecting variations in light absorption \citep{elgendi2019ppg}. These volumetric fluctuations correlate with arterial pressure dynamics: the morphology of the PPG waveform encodes information about vascular stiffness, cardiac output, and peripheral resistance, all of which influence systolic and diastolic blood pressure.
+
+We frame cuffless BP estimation as a \textbf{supervised regression task}: given a 10-second physiological signal segment sampled at 125~Hz (1,250 data points), predict the corresponding systolic blood pressure (SBP) and diastolic blood pressure (DBP), both measured in mmHg. SBP represents peak arterial pressure during ventricular contraction, while DBP represents the trough pressure during ventricular relaxation.
+
+Our approach is a \textbf{two-track experiment} comparing handcrafted feature engineering against end-to-end learned representations. \textbf{Track 1 (Classical ML)} extracts 40 canonical time-series features per signal using Catch22 \citep{lubba2019catch22}, entropy-based complexity measures \citep{bandt2002permutation, rosso2007distinguishing}, and statistical descriptives, then trains five traditional ML models spanning the complexity spectrum from Ridge regression to gradient-boosted ensembles. \textbf{Track 2 (Deep Learning)} feeds raw PPG signal windows directly into neural network architectures (ResNet-1D and ResNet-BiGRU) that learn features automatically, bypassing manual feature engineering entirely.
+
+This dual-track design tests a fundamental question in applied machine learning: does domain-specific feature engineering outperform end-to-end learning on physiological time-series data? A signal ablation study further investigates whether additional physiological signals (ECG) improve PPG-based BP estimation, addressing the practical question of sensor requirements for wearable deployment.
+
+The feature extraction methodology adapts prior work on physiological signal classification using Catch22 and ensemble learning \citep{boda2025ai4pain}. The comprehensive review by \citet{zhao2023cuffless} provides the clinical and methodological context for cuffless BP estimation approaches, and the PulseDB benchmark by \citet{moulaeifard2025pulsedb} establishes the current state-of-the-art performance on the dataset used in this study.
+
+%% ============================================================
+\section{Dataset and Exploratory Data Analysis}
+%% ============================================================
+
+\subsection{Dataset Overview}
+
+We use \textbf{PulseDB v2.0} \citep{wang2023pulsedb}, a large-scale physiological dataset publicly available at \url{https://github.com/pulselabteam/PulseDB}. PulseDB aggregates recordings from two independent hospital systems: the MIMIC-III Waveform Database Matched Subset (Beth Israel Deaconess Medical Center, Boston, USA) and VitalDB (Seoul National University Hospital, South Korea), providing geographic and demographic diversity across two continents and clinical contexts (ICU vs.\ surgical monitoring). Table~\ref{tab:dataset} summarizes the dataset.
+
+\begin{table}[ht!]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Statistic} & \textbf{Value} \\
+\midrule
+Total segments & 5,245,454 \\
+Total subjects & 5,361 \\
+Segment duration & 10 seconds (1,250 samples at 125 Hz) \\
+Signals per segment & PPG, ECG, ABP (3 channels) \\
+Labels & SBP, DBP (continuous, mmHg) \\
+Total recording time & $\sim$14,570 hours \\
+MIMIC subjects (files) & 2,423 \\
+VitalDB subjects (files) & 2,938 \\
+Total on disk (uncompressed) & 963 GB \\
+Train/test split & Subject-level (pre-defined by PulseDB) \\
+Test sets & Calibration-based + calibration-free (279 unseen subjects) \\
+Missing data & NaN filtering applied; segments with $>$20\% NaN rejected \\
+\bottomrule
+\end{tabular}
+\caption{PulseDB v2.0 dataset statistics.}
+\label{tab:dataset}
+\end{table}
+
+Each segment contains three raw physiological signals: \textbf{PPG\_Record} (photoplethysmography, the wearable-viable optical pulse signal), \textbf{ECG\_F} (filtered electrocardiogram, requiring wet adhesive electrodes on the chest), and \textbf{ABP\_Raw} (invasive arterial blood pressure waveform, the gold standard from which SBP and DBP labels are derived via beat-by-beat peak/trough detection).
+
+PulseDB provides three evaluation partitions: a training set (approximately 902,000 segments from 2,506 subjects), a calibration-based (CalBased) test set (held-out segments from training subjects, 100,240 segments), and a calibration-free (CalFree) test set (111,600 segments from 279 completely disjoint subjects never seen during training). The CalFree split is the more clinically meaningful evaluation, as it tests whether models generalize to entirely new individuals without any patient-specific calibration data.
+
+\subsection{Exploratory Data Analysis}
+
+PPG waveforms at 125~Hz exhibit the characteristic pulsatile morphology with systolic peaks, dicrotic notches, and diastolic troughs repeating at heart-rate frequency ($\sim$1~Hz). Signal quality varies across subjects due to motion artifacts, sensor placement, and physiological differences in skin perfusion.
+
+On the CalFree test set (111,600 segments), the target distributions are: SBP mean $= 127.1 \pm 21.5$~mmHg and DBP mean $= 62.7 \pm 11.8$~mmHg. These distributions span the clinical range from hypotension through stage~2 hypertension (SBP~$>$~140~mmHg), providing a challenging regression target with substantial inter-subject variability.
+
+After Rust-based feature extraction (Section~\ref{sec:track1}), each signal segment is represented by 40 features capturing autocorrelation structure, distributional shape, entropy-based complexity, and standard statistical properties. For the PPG-only configuration this yields a 40-dimensional feature vector; for PPG+ECG, an 80-dimensional vector. Feature distributions were inspected for NaN values (replaced where necessary) and extreme outliers prior to StandardScaler normalization.
+
+%% ============================================================
+\section{Approach and Methodology}
+%% ============================================================
+
+\subsection{Two-Track Experiment Design}
+
+Our experiment compares two fundamentally different paradigms for physiological time-series regression. Track~1 applies domain-informed feature engineering followed by classical ML models, while Track~2 uses end-to-end deep learning on raw waveforms. Both tracks predict SBP and DBP as separate regression targets, and both are evaluated on the same CalFree and CalBased test sets. This controlled comparison isolates the effect of representation (handcrafted vs.\ learned) while holding the evaluation protocol fixed.
+
+\subsection{Track 1: Feature Engineering + Classical ML}
+\label{sec:track1}
+
+Each 10-second raw signal segment is transformed into a fixed-length feature vector through a novel pure Rust implementation combining three complementary extraction methods:
+
+\begin{enumerate}[nosep]
+    \item \textbf{Catch22} (22 features): Canonical time-series characteristics capturing autocorrelation, distributional properties, successive differences, fluctuation analysis, and spectral structure \citep{lubba2019catch22}. These features were selected by \citeauthor{lubba2019catch22} from a pool of over 7,000 time-series features for maximum discriminative power with minimal redundancy.
+    \item \textbf{Entropy-based measures} (10 features): Permutation entropy \citep{bandt2002permutation}, statistical complexity \citep{rosso2007distinguishing}, Fisher-Shannon information, Fisher information, R\'{e}nyi entropy and R\'{e}nyi complexity ($\alpha = 2$), Tsallis entropy and Tsallis complexity ($q = 2$), sample entropy, and approximate entropy. These quantify signal regularity and complexity, capturing aspects of PPG morphology not represented by Catch22.
+    \item \textbf{Statistical descriptives} (8 features): Mean, median, standard deviation, skewness, kurtosis, root mean square, minimum, and maximum.
+\end{enumerate}
+
+This yields \textbf{40 features per signal channel}. The Rust implementation parallelizes extraction across 56 CPU cores using Rayon on the NEU Explorer HPC cluster, adapting validated entropy algorithms from prior work on physiological signal classification \citep{boda2025ai4pain}. No existing Rust crate for Catch22 features existed prior to this implementation.
+
+Post-extraction, features are normalized using a per-column StandardScaler fitted exclusively on training subjects and applied to all data partitions, preventing train-test leakage. No pre-extraction normalization is applied to the raw signals.
+
+Five models span the complexity spectrum from linear to nonlinear ensembles:
+
+\begin{itemize}[nosep]
+    \item \textbf{Ridge Regression} \citep{hoerl1970ridge}: L2-regularized linear model serving as the interpretable baseline. Minimizes $\|y - X\beta\|^2 + \lambda\|\beta\|^2$, where $\lambda$ controls the bias-variance tradeoff.
+    \item \textbf{Decision Tree}: Single CART tree providing a nonlinear baseline with inherent interpretability through feature splits.
+    \item \textbf{Random Forest} \citep{breiman2001random}: Bagging ensemble of decorrelated trees. Reduces variance through bootstrap aggregation and random feature subsampling at each split.
+    \item \textbf{XGBoost} \citep{chen2016xgboost}: Gradient boosting with regularization. Sequentially fits trees to pseudo-residuals, reducing bias through additive modeling.
+    \item \textbf{LightGBM} \citep{ke2017lightgbm}: Histogram-based gradient boosting optimized for large-scale datasets. Uses leaf-wise tree growth and gradient-based one-side sampling for efficiency.
+\end{itemize}
+
+\subsection{Track 2: Deep Learning on Raw Signals}
+
+Raw PPG windows (1 channel, 1,250 samples) are fed directly into neural networks without feature extraction. Two architectures are evaluated:
+
+\textbf{ResNet-BiGRU} (primary architecture): A 1D residual network backbone \citep{he2016resnet} followed by a bidirectional GRU \citep{cho2014gru}. The ResNet component consists of a stem layer (7-wide convolution with stride-2 downsampling and max pooling) followed by three residual stages (64, 128, 256 channels) with skip connections. Each residual block applies two 3-wide convolutions with batch normalization and ReLU activation. The resulting feature sequence is passed to a 2-layer bidirectional GRU (hidden size 128), which captures temporal dependencies across the full 10-second window. The final hidden state (256-dimensional, concatenating both directions) feeds through a dropout-regularized fully connected head to produce the scalar BP prediction. The design rationale: ResNet blocks extract local morphological features (waveform shape, dicrotic notch characteristics), while the BiGRU models beat-to-beat evolution and long-range temporal patterns.
+
+\textbf{ResNet-1D} (baseline architecture): The same ResNet backbone with adaptive average pooling and a fully connected head, without the GRU component. This isolates the contribution of temporal modeling by comparing against a purely convolutional approach.
+
+Both models use MSE loss, Adam optimizer, learning rate scheduling with ReduceLROnPlateau, and early stopping with patience of 10 epochs. Training uses a batch size of 512 on NVIDIA H200 GPUs via the NEU Explorer cluster.
+
+\subsection{Hyperparameter Tuning}
+
+All models are tuned using \textbf{Optuna} \citep{akiba2019optuna} with 30 trials per model and the Tree-structured Parzen Estimator (TPE) sampler. The objective is validation MAE on a held-out portion of the training set. Search spaces include:
+
+\begin{itemize}[nosep]
+    \item Ridge: $\alpha \in [10^{-4}, 10^{4}]$ (log-uniform)
+    \item Decision Tree: max depth $\in [5, 50]$, min samples split $\in [2, 100]$
+    \item Random Forest: $n_\text{estimators} \in [100, 1000]$, max depth $\in [10, 50]$, max features $\in \{\text{sqrt}, \text{log2}, 0.5, 0.8\}$
+    \item XGBoost: learning rate $\in [0.01, 0.3]$, $n_\text{estimators} \in [100, 1000]$, max depth $\in [3, 12]$, subsample $\in [0.6, 1.0]$
+    \item LightGBM: learning rate $\in [0.01, 0.3]$, $n_\text{estimators} \in [100, 2000]$, num leaves $\in [31, 256]$, subsample $\in [0.6, 1.0]$
+\end{itemize}
+
+All Optuna studies persist to SQLite databases, enabling resumable tuning across SLURM job submissions. Final models are retrained on the full training set using the best hyperparameters from tuning.
+
+\subsection{Ablation Study: Signal Configuration}
+
+A signal ablation study tests whether additional physiological signals improve PPG-based estimation. The \textbf{PPG-only} configuration (40 features for Track 1, 1 channel for Track 2) represents the wearable-viable case, while \textbf{PPG+ECG} (80 features for Track 1) tests whether ECG morphology adds complementary information beyond PPG alone.
+
+ABP-containing configurations (PPG+ABP, PPG+ECG+ABP) were initially planned but dropped after discovering \textbf{feature-source leakage}: since SBP and DBP labels are derived from the ABP waveform via beat-by-beat peak/trough detection, features extracted from ABP (particularly statistical descriptives like min and max) encode the labels directly. This was confirmed when Random Forest achieved MAE of 1.70~mmHg on the PPG+ECG+ABP configuration, a physically implausible result that indicated information leakage rather than genuine predictive power. Only PPG and PPG+ECG configurations are reported.
+
+\subsection{Interpretability}
+
+For classical ML models, feature importance is assessed via impurity-based importance (Random Forest, Decision Tree), gain-based importance (XGBoost, LightGBM), and coefficient magnitude (Ridge). For deep learning models, \textbf{GradientSHAP} \citep{lundberg2017shap} is applied using the Captum library \citep{kokhlikyan2020captum} to produce temporal attribution maps identifying which regions of the 10-second PPG window are most influential for BP prediction.
+
+\subsection{Evaluation Metrics}
+
+Model performance is assessed using \textbf{MAE} (mean absolute error, in mmHg) as the primary accuracy metric, \textbf{RMSE} (root mean squared error) to penalize large prediction errors, and \textbf{$R^2$} (coefficient of determination) to quantify the proportion of BP variance explained. Clinical evaluation follows the \textbf{AAMI} standard \citep{aami2003sp10}, which requires MAE $< 5$~mmHg and SD of error $< 8$~mmHg, and \textbf{BHS grading} \citep{obrien1993bhs}, which classifies models by the percentage of predictions within 5, 10, and 15~mmHg of ground truth (Grade~A: $\geq 60\%/85\%/95\%$; Grade~B: $\geq 50\%/75\%/90\%$; Grade~C: $\geq 40\%/65\%/85\%$). \textbf{Bland-Altman analysis} \citep{bland1986agreement} provides clinical agreement assessment by plotting prediction error against the mean of predicted and true values, quantifying systematic bias and limits of agreement.
+
+All metrics are reported on the CalFree test set (111,600 segments from 279 unseen subjects) as the primary evaluation, with CalBased results reported for the best model to quantify the calibration gap.
+
+%% ============================================================
+\section{Discussion and Result Interpretation}
+%% ============================================================
+
+This section presents the complete results across all seven models, analyzes performance patterns, and interprets findings in the context of clinical standards and prior work.
+
+\subsection{Classical ML Results (Track 1)}
+
+Table~\ref{tab:classical_ppg} reports all five classical ML models evaluated on the CalFree test set using PPG-only features (40 features).
+
+\begin{table}[ht!]
+\centering
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Model} & \textbf{SBP MAE} & \textbf{SBP RMSE} & \textbf{SBP $R^2$} & \textbf{DBP MAE} & \textbf{DBP RMSE} & \textbf{DBP $R^2$} \\
+\midrule
+LightGBM     & 14.46 & 18.29 & 0.211 & 8.54  & 10.97 & 0.201 \\
+Random Forest & 14.69 & 18.49 & 0.193 & 8.66  & 11.13 & 0.177 \\
+Decision Tree & 15.28 & 19.27 & 0.124 & 8.96  & 11.44 & 0.131 \\
+XGBoost      & 15.52 & 19.39 & 0.113 & 8.91  & 11.33 & 0.147 \\
+Ridge        & 15.50 & 19.39 & 0.113 & 9.14  & 11.54 & 0.115 \\
+\bottomrule
+\end{tabular}
+\caption{Classical ML results on CalFree test set, PPG-only configuration (40 features, 111,600 segments).}
+\label{tab:classical_ppg}
+\end{table}
+
+LightGBM achieves the best classical ML performance across all metrics, with SBP MAE of 14.46~mmHg and DBP MAE of 8.54~mmHg. The ranking follows the expected pattern from ensemble learning theory: histogram-based boosting (LightGBM) outperforms bagging (Random Forest), which outperforms a single decision tree, which roughly ties with the gradient boosting baseline (XGBoost). Ridge regression, as the linear baseline, performs comparably to XGBoost, suggesting that the relationship between Catch22/entropy features and blood pressure is only weakly nonlinear at the population level.
+
+The modest $R^2$ values (0.113 to 0.211) indicate that the 40-feature representation explains 11--21\% of BP variance. This is consistent with the inherent difficulty of population-level cuffless BP estimation: inter-subject physiological differences (arterial stiffness, body composition, autonomic tone) introduce variance that PPG morphology alone cannot fully capture without subject-specific calibration.
+
+\textbf{Signal ablation (PPG+ECG):} Table~\ref{tab:classical_ppgecg} shows the top two classical models retrained on 80 features (PPG + ECG).
+
+\begin{table}[ht!]
+\centering
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Model} & \textbf{SBP MAE} & \textbf{DBP MAE} \\
+\midrule
+LightGBM      & 14.43 & 8.66 \\
+Random Forest  & 14.70 & 8.77 \\
+\bottomrule
+\end{tabular}
+\caption{Classical ML with PPG+ECG features (80 features) on CalFree test set, best models only.}
+\label{tab:classical_ppgecg}
+\end{table}
+
+Adding ECG features yields a negligible improvement of 0.03~mmHg for LightGBM SBP (14.46 $\to$ 14.43) and actually increases DBP error by 0.12~mmHg (8.54 $\to$ 8.66). This result has a clear practical implication: ECG, which requires chest electrodes and dedicated hardware, provides no meaningful benefit over PPG alone for BP estimation. PPG captured by a simple wrist-worn optical sensor is sufficient. This finding aligns with the physiological intuition that PPG waveform morphology already encodes the hemodynamic information most relevant to arterial pressure, and ECG timing features (R-R intervals, QRS morphology) are largely redundant with the pulse timing information present in PPG.
+
+\subsection{Deep Learning Results (Track 2)}
+
+Table~\ref{tab:dl_calfree} reports both deep learning architectures on the CalFree test set using raw PPG input (1 channel, 1,250 samples).
+
+\begin{table}[ht!]
+\centering
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Model} & \textbf{SBP MAE} & \textbf{SBP $R^2$} & \textbf{DBP MAE} & \textbf{DBP $R^2$} & \textbf{BHS DBP} \\
+\midrule
+ResNet-BiGRU & 13.61 & 0.266 & 7.97 & 0.284 & C \\
+ResNet-1D    & 13.84 & 0.253 & 7.90 & 0.315 & D \\
+\bottomrule
+\end{tabular}
+\caption{Deep learning results on CalFree test set (raw PPG, 111,600 segments).}
+\label{tab:dl_calfree}
+\end{table}
+
+ResNet-BiGRU achieves the best overall SBP MAE (13.61~mmHg) and the best SBP $R^2$ (0.266), confirming that bidirectional temporal modeling of the feature sequence adds meaningful information beyond what purely convolutional pooling captures. The improvement over ResNet-1D (13.61 vs.\ 13.84 SBP MAE) validates the architectural hypothesis that beat-to-beat evolution across the 10-second window carries BP-relevant information.
+
+Interestingly, ResNet-1D achieves slightly better DBP $R^2$ (0.315 vs.\ 0.284) despite higher DBP MAE (7.90 vs.\ 7.97). This suggests that the convolutional architecture captures diastolic-relevant local features (dicrotic notch shape, diastolic runoff slope) slightly better in terms of variance explained, while the BiGRU's temporal context reduces absolute prediction errors.
+
+\textbf{BHS grading:} ResNet-BiGRU achieves BHS Grade~C for DBP, with 40.8\% of predictions within 5~mmHg, 69.7\% within 10~mmHg, and 86.2\% within 15~mmHg (Grade~C thresholds: $\geq 40\%/65\%/85\%$). ResNet-1D falls to Grade~D. No model achieves BHS grading for SBP. While Grade~C is not clinically sufficient for regulatory approval, it represents meaningful signal extraction from raw PPG on a population-level, calibration-free evaluation.
+
+\textbf{CalBased evaluation:} Table~\ref{tab:dl_calbased} shows ResNet-BiGRU performance when calibration data from the same subjects is available during training.
+
+\begin{table}[ht!]
+\centering
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Model} & \textbf{SBP MAE} & \textbf{SBP $R^2$} & \textbf{DBP MAE} & \textbf{DBP $R^2$} \\
+\midrule
+ResNet-BiGRU & 11.98 & 0.457 & 7.33 & 0.402 \\
+\bottomrule
+\end{tabular}
+\caption{ResNet-BiGRU on CalBased test set (100,240 segments, same subjects seen during training).}
+\label{tab:dl_calbased}
+\end{table}
+
+CalBased performance improves substantially: SBP MAE drops from 13.61 to 11.98~mmHg (12\% improvement), and $R^2$ increases from 0.266 to 0.457. This gap confirms that \textbf{calibration is the primary bottleneck}, not model capacity. When the model has seen examples from the same subject during training, it leverages subject-specific PPG characteristics (waveform baseline, pulse amplitude, arterial compliance signature) to substantially reduce prediction error. This is a critical finding for clinical deployment: personalized, calibration-aware architectures are necessary to close the gap to clinical acceptability.
+
+\subsection{Cross-Track Comparison}
+
+Table~\ref{tab:cross_track} summarizes the best models from each track.
+
+\begin{table}[ht!]
+\centering
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+\textbf{Track} & \textbf{Best Model} & \textbf{SBP MAE} & \textbf{SBP $R^2$} & \textbf{DBP MAE} & \textbf{DBP $R^2$} \\
+\midrule
+Classical ML & LightGBM (PPG, 40 feat.) & 14.46 & 0.211 & 8.54 & 0.201 \\
+Deep Learning & ResNet-BiGRU (raw PPG) & 13.61 & 0.266 & 7.97 & 0.284 \\
+\bottomrule
+\end{tabular}
+\caption{Best model from each track on CalFree test set.}
+\label{tab:cross_track}
+\end{table}
+
+Deep learning outperforms the best classical ML model by 0.85~mmHg on SBP and 0.57~mmHg on DBP, without requiring any feature engineering. The $R^2$ improvement (0.211 $\to$ 0.266 for SBP, 0.201 $\to$ 0.284 for DBP) indicates that end-to-end learning extracts approximately 5--8 additional percentage points of BP variance from the raw waveform compared to the 40-feature Catch22/entropy/stats representation. This suggests that the handcrafted features, while capturing many relevant signal properties, miss some BP-predictive information present in the raw waveform morphology, particularly fine-grained temporal patterns that the ResNet residual blocks and BiGRU can jointly extract.
+
+However, the classical ML pipeline has practical advantages: faster training (minutes vs.\ hours on GPU), full interpretability through feature importance, and no requirement for GPU infrastructure. For resource-constrained deployment scenarios, LightGBM on Catch22 features provides a viable alternative with only modest accuracy loss.
+
+\subsection{Clinical Standard Compliance}
+
+\textbf{AAMI compliance:} All seven models fail to meet the AAMI standard (MAE $< 5$~mmHg, SD $< 8$~mmHg) \citep{aami2003sp10}. The best SBP MAE (13.61~mmHg, ResNet-BiGRU) exceeds the 5~mmHg threshold by a factor of 2.7. This result is consistent with the broader cuffless BP literature: no published method on large-scale, multi-site datasets with invasive ABP-derived labels has achieved AAMI compliance in calibration-free evaluation \citep{moulaeifard2025pulsedb}. The fundamental challenge is that ground-truth labels in PulseDB derive from invasive arterial catheter measurements in ICU and surgical settings, creating a domain gap between the measurement conditions (critically ill, hemodynamically unstable patients) and the target deployment (ambulatory, healthy individuals with wrist-worn sensors).
+
+\textbf{Comparison to prior work:} Our ResNet-BiGRU SBP MAE of 13.61~mmHg is consistent with the PulseDB benchmark results reported by \citet{moulaeifard2025pulsedb}, who found SBP MAE of approximately 13.9~mmHg for competitive deep learning methods on the CalFree test set. This confirms that our implementation and evaluation protocol align with the state of the art on this dataset.
+
+\subsection{Feature Importance and Interpretability}
+
+\textbf{Classical ML (impurity/gain-based importance):} Across all ensemble models, entropy-based features receive disproportionately high importance weights. Permutation entropy, statistical complexity, and sample entropy rank among the top 5 features for both SBP and DBP prediction in LightGBM and Random Forest. This makes physiological sense: entropy measures quantify the regularity and complexity of the PPG waveform, which reflects arterial stiffness and vascular compliance, both direct determinants of blood pressure. Among Catch22 features, those capturing autocorrelation structure and distributional shape (e.g., first minimum of the autocorrelation function, distribution entropy) rank highly, while fluctuation analysis features contribute less. Statistical descriptives (particularly standard deviation and RMS) also rank in the top 10, as they reflect pulse amplitude, which correlates with pulse pressure (SBP $-$ DBP).
+
+\textbf{Deep Learning (GradientSHAP):} Temporal attribution maps from GradientSHAP reveal that the ResNet-BiGRU model concentrates its attention on the final portion of the 10-second window, specifically timesteps corresponding to approximately 7.4--9.0 seconds. This region coincides with the \textbf{dicrotic notch} portion of the PPG cardiac cycle, the brief upward deflection in the waveform following the systolic peak that reflects aortic valve closure and arterial compliance. The dicrotic notch morphology is a known correlate of arterial stiffness and peripheral vascular resistance, both of which directly influence SBP. The model's learned focus on this region aligns with physiological domain knowledge, providing evidence that the neural network has discovered clinically meaningful signal features rather than spurious correlations.
+
+\subsection{Error Analysis}
+
+Several factors contribute to the observed prediction errors. \textbf{Inter-subject variability} is the most fundamental: different individuals with the same PPG morphology can have substantially different blood pressures due to differences in arterial stiffness, body composition, and cardiovascular health, and without calibration the model must predict from population-level correlations alone. \textbf{Label noise} also plays a role, as SBP and DBP labels are derived from invasive ABP waveforms via automated peak/trough detection, where beat-to-beat variation, catheter damping artifacts, and algorithmic imprecision introduce noise that sets a floor on achievable MAE. A \textbf{domain gap} further complicates generalization: PulseDB subjects are ICU and surgical patients, a population physiologically distinct from the ambulatory healthy population targeted by wearable BP monitors, where hemodynamic instability and vasopressor effects may reduce the transferability of learned PPG-BP relationships. Finally, \textbf{SBP is consistently harder than DBP} across all models, with SBP MAE exceeding DBP MAE by 5--7~mmHg. This is consistent with the higher variance of SBP in the dataset ($\sigma_{\text{SBP}} = 21.5$ vs.\ $\sigma_{\text{DBP}} = 11.8$~mmHg) and the fact that SBP is more sensitive to transient hemodynamic events (e.g., respiratory variation, autonomic surges) that may not be fully captured in a 10-second PPG window.
+
+%% ============================================================
+\section{Conclusion}
+%% ============================================================
+
+This study demonstrates that cuffless blood pressure estimation from PPG signals is feasible using both classical machine learning with domain-informed time-series features and end-to-end deep learning, though significant challenges remain before clinical deployment.
+
+First, \textbf{PPG alone is sufficient}: adding ECG features provides negligible improvement ($< 0.1$~mmHg SBP), confirming that a single wrist-worn optical sensor captures the hemodynamic information most relevant to BP estimation and eliminating the need for wet adhesive chest electrodes in wearable deployment. Second, \textbf{deep learning outperforms classical ML}: ResNet-BiGRU achieves SBP MAE of 13.61~mmHg vs.\ 14.46~mmHg for LightGBM, a 0.85~mmHg improvement without any feature engineering, demonstrating that end-to-end learning extracts additional BP-predictive information from raw waveform morphology. Third, \textbf{calibration is the bottleneck}: CalBased evaluation reduces SBP MAE by 12\% (13.61 $\to$ 11.98~mmHg), confirming that subject-specific adaptation is the primary path to clinical accuracy. Fourth, \textbf{AAMI compliance remains an open challenge}: no model approaches the 5~mmHg MAE threshold, consistent with the state of the art on large-scale calibration-free evaluation \citep{moulaeifard2025pulsedb}. Finally, \textbf{models learn physiologically meaningful features}: entropy measures dominate classical ML importance rankings, and GradientSHAP reveals that the deep learning model focuses on the dicrotic notch region, a known correlate of arterial stiffness.
+
+\textbf{Future work:} Three directions could substantially improve cuffless BP accuracy. First, calibration-aware architectures that incorporate a small number of subject-specific reference measurements (e.g., meta-learning or domain adaptation) could bridge the CalFree-to-CalBased performance gap. Second, personalized models using transfer learning from a large pre-trained population model, fine-tuned on per-user calibration data, could exploit the strong CalBased results. Third, data augmentation and self-supervised pre-training on the 5.2 million available segments could improve generalization, particularly for underrepresented BP ranges (hypotension, stage~2 hypertension).
+
+The Rust feature extraction pipeline, deep learning architectures, and evaluation framework developed for this project are fully open-source and reproducible, with all code, configurations, and SLURM scripts available at the linked repository.
+
+%% ============================================================
+\section{References}
+%% ============================================================
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+%% ============================================================
+\section{Team Member Contribution}
+%% ============================================================
+
+\vspace{0.5em}
+\noindent
+\begin{tabular}{@{}lp{12cm}@{}}
+\toprule
+\textbf{Member} & \textbf{Contributions} \\
+\midrule
+Vignan Kamarthi & Rust feature extraction pipeline (Catch22, entropy, stats), deep learning architecture design and implementation (ResNet-BiGRU, ResNet-1D), Python ML pipeline (data loading, model training, evaluation), Optuna hyperparameter tuning infrastructure, GradientSHAP interpretability analysis, NEU Explorer cluster infrastructure and SLURM job management, evaluation framework (AAMI, BHS, Bland-Altman), final report writing \\
+\midrule
+Ariv Ahuja & Dataset acquisition and download pipeline, NEU Explorer cluster setup, SLURM script development, literature review and related work survey, project proposal and milestone report writing, evaluation metric design, exploratory data analysis, presentation preparation \\
+\bottomrule
+\end{tabular}
+
+\end{document}
